@@ -121,86 +121,86 @@ input:focus{border-color:var(--accent)}
    The imposter sees the category plus (optionally) one of the hints.
    ========================================================================== */
 const CAT_DATA = {
-'Food': `Pizza|round and shared|Italian, baked with cheese
-Sushi|often served cold|rice with raw fish or vegetables
-Burger|comes in a bun|a patty with toppings
-Pancakes|a breakfast thing|flat and stacked, with syrup
-Ice cream|it melts|a frozen dessert in a cone or tub
-Fried rice|made from leftovers a lot|a stir fried grain dish
-Tacos|they get folded|a Mexican shell with fillings
-Chocolate|sweet and tempting|made from cocoa beans
-Popcorn|it makes noise|a cinema snack
-Noodles|slurpable|long strands in soup or stir fry`,
-'Animals': `Elephant|very big|it has a trunk
-Penguin|likes the cold|a black and white bird that cannot fly
-Giraffe|tall|it has a very long neck
-Dolphin|lives in water|a clever sea mammal
-Kangaroo|it jumps|carries its young in a pouch
-Owl|awake at night|a bird that says hoo
-Octopus|soft and clever|it has eight arms
-Monkey|good at climbing|swings between trees
-Shark|people fear it|a fin above the water
-Butterfly|starts life as something else|a colourful insect with wings`,
-'Places': `Library|very quiet|full of books
-Beach|sandy|waves and sunbathing
-Airport|lots of waiting|planes and boarding gates
-Hospital|people worry here|doctors and wards
-Supermarket|trolleys everywhere|aisles of groceries
-Cinema|it is dark inside|a big screen and popcorn
-Zoo|busy with families|animals in enclosures
-School|bells ring here|classrooms and teachers
-Gym|sweaty|weights and treadmills
-Museum|look but do not touch|exhibits and history`,
-'Jobs': `Doctor|helps people|wears a white coat or scrubs
-Teacher|talks a lot|runs a classroom
-Chef|works near heat|cooks in a restaurant kitchen
-Pilot|works up high|flies planes
-Farmer|early mornings|grows crops and raises animals
-Firefighter|runs toward danger|puts out blazes
-Dentist|people dread visits|checks your teeth
-Police officer|wears a uniform|enforces the law
-Photographer|looks carefully|takes pictures
-Barista|busy in the mornings|makes coffee`,
-'Sports': `Football|ninety minutes|goals and a round ball
-Basketball|tall players|a hoop and dribbling
-Tennis|uses a racket|a net and love scores
-Swimming|you get wet|lanes in a pool
-Badminton|very light equipment|a shuttlecock
-Cricket|matches can last days|bat, ball and wickets
-Boxing|gloves|a ring and rounds
-Volleyball|a net in the middle|spiking the ball over it
-Golf|the crowd stays quiet|clubs and holes
-Cycling|two wheels|races like the Tour de France`,
-'Household Items': `Toothbrush|used twice a day|it has bristles
-Pillow|soft|for your head at night
-Fridge|it hums|keeps food cold
-Umbrella|used in bad weather|opens over your head
-Scissors|two blades|cuts paper
-Mirror|shows you something|reflects your face
-Kettle|it boils|heats water
-Sofa|comfortable|a seat for several people
-Clock|always ticking|shows the time
-Broom|for cleaning|sweeps floors`,
-'Transport': `Bicycle|you pedal it|two wheels and no engine
-Train|runs on tracks|carriages and stations
-Airplane|it takes off|flies with wings
-Bus|many stops|a public road vehicle
-Taxi|you pay at the end|a hired car with a driver
-Ferry|crosses water|carries cars and people on a boat
-Motorbike|loud|two wheels with an engine
-Helicopter|it spins|rotor blades on top
-Skateboard|good for tricks|a deck with four small wheels
-Submarine|goes deep|an underwater vessel`,
-'Fruit': `Apple|keeps doctors away|red or green and crunchy
-Banana|yellow|peel it, it is curved
-Watermelon|summer favourite|green outside, red inside with seeds
-Pineapple|spiky|tropical, sweet, with a crown
-Strawberry|small and red|has seeds on the outside
-Mango|messy to eat|tropical, orange flesh, big stone
-Grapes|come in bunches|can turn into wine
-Orange|shares its name with a colour|citrus with a peel and segments
-Durian|you smell it first|spiky and famously pungent
-Coconut|hard shell|water inside and white flesh`
+'Food': `Pizza|shared|cheese
+Sushi|Japanese|fish
+Burger|fast|patty
+Pancakes|breakfast|syrup
+Ice cream|cold|scoop
+Fried rice|Asian|wok
+Tacos|folded|Mexican
+Chocolate|sweet|cocoa
+Popcorn|snack|kernels
+Noodles|slurp|strands`,
+'Animals': `Elephant|big|trunk
+Penguin|cold|flightless
+Giraffe|tall|neck
+Dolphin|ocean|flipper
+Kangaroo|hop|pouch
+Owl|night|hoot
+Octopus|soft|tentacles
+Monkey|climb|banana
+Shark|feared|fin
+Butterfly|colourful|caterpillar`,
+'Places': `Library|quiet|books
+Beach|sandy|waves
+Airport|waiting|runway
+Hospital|worried|ward
+Supermarket|trolleys|aisles
+Cinema|dark|screen
+Zoo|families|animals
+School|bells|classroom
+Gym|sweaty|weights
+Museum|history|exhibits`,
+'Jobs': `Doctor|caring|stethoscope
+Teacher|talking|lessons
+Chef|heat|kitchen
+Pilot|high|cockpit
+Farmer|early|crops
+Firefighter|danger|hose
+Dentist|dread|teeth
+Police officer|uniform|law
+Photographer|looking|camera
+Barista|mornings|coffee`,
+'Sports': `Football|ninety|goals
+Basketball|tall|hoop
+Tennis|racket|Wimbledon
+Swimming|wet|lanes
+Badminton|feathers|shuttlecock
+Cricket|long|wickets
+Boxing|gloves|ring
+Volleyball|net|spike
+Golf|quiet|clubs
+Cycling|wheels|pedals`,
+'Household Items': `Toothbrush|morning|bristles
+Pillow|soft|bed
+Fridge|hums|chilled
+Umbrella|weather|rain
+Scissors|sharp|snip
+Mirror|bathroom|reflection
+Kettle|hot|steam
+Sofa|comfy|cushions
+Clock|ticking|minutes
+Broom|cleaning|sweep`,
+'Transport': `Bicycle|healthy|handlebars
+Train|tracks|station
+Airplane|sky|wings
+Bus|public|route
+Taxi|hired|meter
+Ferry|water|crossing
+Motorbike|loud|helmet
+Helicopter|spinning|rotor
+Skateboard|tricks|ramp
+Submarine|deep|periscope`,
+'Fruit': `Apple|crunchy|core
+Banana|yellow|peel
+Watermelon|summer|seeds
+Pineapple|spiky|tropical
+Strawberry|red|jam
+Mango|messy|stone
+Grapes|bunch|wine
+Orange|colour|citrus
+Durian|smelly|pungent
+Coconut|hard|husk`
 };
 
 const CATEGORIES = {};
@@ -628,7 +628,7 @@ function homeHTML() {
         <button class="btn join" data-act="join">Join room</button>
       `}
     </section>
-    <p class="foot muted">Games: Imposter now, Werewolf and Mafia coming soon.<br>Version 5</p>
+    <p class="foot muted">Games: Imposter now, Werewolf and Mafia coming soon.<br>Version 6</p>
   </div>`;
 }
 
