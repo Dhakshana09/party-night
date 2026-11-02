@@ -281,8 +281,30 @@ class Host {
     this.game = null;
     this.used = new Set();
     this.players.set(PID, { id: PID, name: cleanName(name), conn: null, connected: true });
+    this.online = true; this.recovering = false;
+    this.attach(peer);
+  }
+
+  /* Keep the room registered with the connection server. Phones pause pages in the background,
+     which can drop the registration, so we re-register whenever we notice. */
+  attach(peer) {
+    this.peer = peer;
     peer.on('connection', conn => this.onConn(conn));
-    peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) { /* ignore */ } });
+    peer.on('open', () => { this.online = true; this.broadcast(); });
+    peer.on('disconnected', () => { this.online = false; this.broadcast(); this.recover(); });
+    peer.on('error', err => { if (err && err.type !== 'peer-unavailable') this.recover(); });
+  }
+  recover() {
+    if (this.recovering) return;
+    this.recovering = true;
+    const step = n => {
+      const peer = this.peer;
+      if (peer.destroyed) this.attach(new Peer(PREFIX + this.code, PEER_OPTS));   // fully gone: same room code, fresh peer
+      else if (peer.disconnected) { try { peer.reconnect(); } catch (e) { /* ignore */ } }
+      else { this.recovering = false; return; }
+      setTimeout(() => ((this.peer.disconnected || this.peer.destroyed) ? step(n + 1) : (this.recovering = false)), Math.min(2500 + n * 1000, 8000));
+    };
+    step(0);
   }
 
   /* ---------- connections ---------- */
@@ -345,7 +367,8 @@ class Host {
       })),
       settings: this.settings,
       allCats: Object.keys(CATEGORIES),
-      phase: g ? g.phase : 'lobby'
+      phase: g ? g.phase : 'lobby',
+      hostOnline: this.online
     };
     if (g) {
       const imp = g.imposters.has(pid);
@@ -544,6 +567,7 @@ function createRoom() {
       host = new Host(code, peer, ui.name);
       store('session', 'pn_joined', code);
       host.broadcast();
+      keepAwake();
     });
     peer.on('error', err => {
       if (opened) { console.warn('peer error', err); return; }
@@ -555,10 +579,18 @@ function createRoom() {
   attempt();
 }
 
+const JOIN_WAIT = window.__JOIN_WAIT || 20;   // how many times to look for the room, 2 seconds apart
+function explainFailure(reason, code) {
+  const tail = ' (' + reason + ')';
+  if (reason === 'peer-unavailable') return 'Room ' + code + ' is not online right now. Ask the host to open the Party Night page and keep it in front, then try again.' + tail;
+  if (reason === 'timeout' || reason === 'closed') return 'Found the room but could not connect. Some school, office or mobile networks block this. Try a different network, such as Wi-Fi instead of mobile data.' + tail;
+  return 'Could not reach the connection server. Check your internet and try again.' + tail;
+}
+
 function joinRoom(code) {
   if (!netReady()) return;
   ui.joinCode = code;
-  ui.error = '';
+  ui.error = ''; ui.connectMsg = '';
   if (guest) guest.tries = 0;
   connectGuest(true);
 }
@@ -576,13 +608,20 @@ function connectGuest(first) {
     guest = null; ui.view = null; ui.lastJson = ''; ui.reconnecting = false;
     ui.screen = 'home'; ui.error = text; render();
   };
-  const retry = () => {
+  const retry = reason => {
     if (guest !== me || me.leaving) return;
     if (ui.view) {
       if (++me.tries > 20) return giveUp('The host seems to have left the room.');
       ui.reconnecting = true; render();
       setTimeout(() => { if (guest === me) connectGuest(false); }, 2000);
-    } else giveUp('Could not find that room. Check the code and try again.');
+      return;
+    }
+    // Not in the room yet. If the room is simply not online (host away or still starting), keep looking for a while.
+    const max = reason === 'peer-unavailable' ? JOIN_WAIT : 3;
+    if (++me.tries > max) return giveUp(explainFailure(reason, code));
+    ui.connectMsg = reason === 'peer-unavailable' ? 'Looking for room ' + code + '... the host needs to have the page open.' : 'Connecting...';
+    render();
+    setTimeout(() => { if (guest === me) connectGuest(false); }, 2000);
   };
 
   const peer = new Peer(undefined, PEER_OPTS);
@@ -590,7 +629,7 @@ function connectGuest(first) {
   peer.on('open', () => {
     const conn = peer.connect(PREFIX + code, { reliable: true, serialization: 'json' });
     me.conn = conn;
-    const timer = setTimeout(() => { if (!conn.open) retry(); }, 12000);
+    const timer = setTimeout(() => { if (!conn.open) retry('timeout'); }, 12000);
     conn.on('open', () => { clearTimeout(timer); conn.send({ t: 'join', name: ui.name, pid: PID }); });
     conn.on('data', msg => {
       if (!msg) return;
@@ -600,12 +639,12 @@ function connectGuest(first) {
       } else if (msg.t === 'toast') toast(msg.msg);
       else if (msg.t === 'error') giveUp(msg.msg);
     });
-    conn.on('close', () => { clearTimeout(timer); retry(); });
+    conn.on('close', () => { clearTimeout(timer); retry('closed'); });
   });
   peer.on('error', err => {
     if (guest !== me) return;
-    if (err.type === 'peer-unavailable') retry();
-    else if (!me.conn || !me.conn.open) retry();
+    if (err.type === 'peer-unavailable') retry('peer-unavailable');
+    else if (!me.conn || !me.conn.open) retry(err.type || 'error');
   });
 }
 
@@ -666,7 +705,7 @@ function homeHTML() {
 }
 
 function connectingHTML() {
-  return `<div class="wrap home"><div class="spinner"></div><p class="muted">Connecting...</p>
+  return `<div class="wrap home"><div class="spinner"></div><p class="muted">${esc(ui.connectMsg || 'Connecting...')}</p>
     <button class="link" data-act="leave">Cancel</button></div>`;
 }
 
@@ -694,6 +733,7 @@ function roomHTML() {
       </span>
     </div>
     ${ui.reconnecting ? '<div class="banner warn">Connection lost. Trying to reconnect...</div>' : ''}
+    ${V.me.isHost && V.hostOnline === false ? '<div class="banner warn">Your room went offline, so friends cannot join right now. Reconnecting...</div>' : ''}
     ${body}
     <div style="text-align:center"><button class="link" data-act="leave">${V.me.isHost ? 'End room' : 'Leave room'}</button></div>
   </div>`;
@@ -755,7 +795,8 @@ function lobbyHTML() {
       <p class="muted" style="margin-top:10px">Everyone gets the same secret word, except the imposter. Give clues, spot the bluffer, and vote them out.</p>
     </section>
     <section class="card"><h2>Players (${n})</h2>${playerRows()}
-      <p class="muted">Share the room code <b>${esc(V.code)}</b> or tap Invite to send the link.</p></section>
+      <p class="muted">Share the room code <b>${esc(V.code)}</b> or tap Invite to send the link.</p>
+      ${isHost ? '<p class="muted">Keep this page open while friends join. On a phone, come back to this page before they try to join.</p>' : ''}</section>
     <section class="card"><h2>Settings</h2>${settings}</section>
     ${isHost
       ? `<button class="btn primary" data-act="start" ${n < 3 ? 'disabled' : ''}>${n < 3 ? 'Need at least 3 players' : 'Start game'}</button>`
@@ -964,6 +1005,14 @@ document.addEventListener('keydown', e => {
 /* ==========================================================================
    Boot
    ========================================================================== */
+/* Keep the host's screen awake, and re-register the room when the page comes back to the front. */
+let wakeLock = null;
+async function keepAwake() {
+  try { if (host && 'wakeLock' in navigator && !document.hidden) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* not supported or refused */ }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && host) { host.recover(); keepAwake(); } });
+window.addEventListener('online', () => { if (host) host.recover(); });
+
 (function boot() {
   const m = location.hash.match(/([A-Za-z]{4})/);
   if (m) ui.joinCode = m[1].toUpperCase();
