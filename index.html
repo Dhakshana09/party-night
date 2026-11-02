@@ -93,21 +93,12 @@ input:focus{border-color:var(--accent)}
 .codeinput{text-align:center;letter-spacing:8px;font-size:24px;font-weight:800;text-transform:uppercase}
 .joinbox{text-align:center;margin:16px 0 4px}
 .roomcode{display:inline-block;font-size:34px;font-weight:900;letter-spacing:8px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:6px 18px;margin-top:4px}
-.votebtn{
-  display:flex;align-items:center;gap:10px;width:100%;text-align:left;
-  appearance:none;border:2px solid var(--line);background:#10142a;color:var(--ink);
-  padding:10px 12px;border-radius:12px;font-size:16px;margin:8px 0;cursor:pointer;
-}
-.votebtn.sel{border-color:var(--accent2);background:#3a1a34}
 .secret .role{text-align:center;padding:8px 0}
 .word{font-size:40px;font-weight:900;margin:8px 0;letter-spacing:.5px}
 .role.imp .tag{font-size:15px}
 .big{font-size:22px;font-weight:800;text-align:center;margin:6px 0 10px}
 .winner{border:2px solid var(--good)}
 .winner.imp{border-color:var(--accent2)}
-.recap h3{font-size:13px;color:var(--muted);margin:10px 0 4px;text-transform:uppercase;letter-spacing:1px}
-.recap .c{display:flex;justify-content:space-between;gap:10px;padding:4px 0}
-.recap .c span:last-child{font-weight:700}
 .spinner{width:34px;height:34px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);margin:18px auto;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#2b3160;border:1px solid var(--line);padding:10px 16px;border-radius:12px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;z-index:9}
@@ -246,7 +237,7 @@ function store(kind, key, val) {
 }
 const PID = store('session', 'pn_pid') || (() => { const p = uid(); store('session', 'pn_pid', p); return p; })();
 
-const defaultSettings = () => ({ cats: Object.keys(CATEGORIES), imposters: 1, hint: 'light', guess: true });
+const defaultSettings = () => ({ cats: Object.keys(CATEGORIES), imposters: 1, hint: 'light' });
 
 let toastTimer;
 function toast(msg) {
@@ -368,7 +359,6 @@ class Host {
       p = { id: pid, name, conn, connected: true };
       this.players.set(pid, p); conn.pid = pid;
     }
-    this.progress();
     this.broadcast();
   }
   reject(conn, text) {
@@ -380,7 +370,6 @@ class Host {
     if (!p || p.conn !== conn) return;
     if (!this.game) this.players.delete(p.id);
     else p.connected = false;
-    this.progress();
     this.broadcast();
   }
   notify(pid, msg) {
@@ -395,8 +384,7 @@ class Host {
       code: this.code,
       me: { id: pid, name: me.name, isHost: pid === this.hostId },
       players: [...this.players.values()].map(p => ({
-        id: p.id, name: p.name, isHost: p.id === this.hostId, connected: p.connected,
-        alive: g ? g.alive.has(p.id) : true
+        id: p.id, name: p.name, isHost: p.id === this.hostId, connected: p.connected
       })),
       settings: this.settings,
       allCats: Object.keys(CATEGORIES),
@@ -406,12 +394,7 @@ class Host {
     if (g) {
       const imp = g.imposters.has(pid);
       v.role = { imp, cat: g.cat, word: imp ? null : g.word, hint: imp && g.hint !== 'none' ? g[g.hint] : null };
-      v.roundNo = g.roundNo;
-      v.ready = [...g.ready];
-      v.voted = Object.keys(g.votes);
-      v.myVote = g.votes[pid] || null;
-      if (g.phase === 'result' || g.phase === 'end') v.result = g.result;
-      if (g.phase === 'end') v.end = { word: g.word, cat: g.cat, imposters: [...g.imposters], winner: g.winner };
+      if (g.phase === 'end') v.end = { word: g.word, cat: g.cat, imposters: [...g.imposters] };
     }
     return v;
   }
@@ -429,23 +412,7 @@ class Host {
     switch (msg.t) {
       case 'settings': if (isHost && !g) this.setSetting(msg.key, msg.val); break;
       case 'start': if (isHost && !g) this.start(); break;
-      case 'ready':
-        if (g && g.phase === 'reveal') { g.ready.add(pid); this.checkReveal(); }
-        break;
-      case 'forceReady': if (isHost && g && g.phase === 'reveal') this.startTalk(); break;
-      case 'toVote': if (isHost && g && g.phase === 'talk') { g.phase = 'vote'; g.votes = {}; } break;
-      case 'vote':
-        if (g && g.phase === 'vote' && g.alive.has(pid) && g.alive.has(msg.id) && msg.id !== pid) {
-          g.votes[pid] = msg.id; this.checkVotes();
-        }
-        break;
-      case 'tally': if (isHost && g && g.phase === 'vote') this.tally(); break;
-      case 'guess':
-        if (g && g.phase === 'result' && g.result.pendingGuess && g.result.eliminated === pid)
-          this.resolveGuess(String(msg.text || '').trim().slice(0, 40));
-        break;
-      case 'skipGuess': if (isHost && g && g.phase === 'result' && g.result.pendingGuess) this.resolveGuess(''); break;
-      case 'next': if (isHost && g && g.phase === 'result' && !g.result.pendingGuess) this.nextAfterResult(); break;
+      case 'finish': if (isHost && g && g.phase === 'play') g.phase = 'end'; break;
       case 'again':
         if (isHost && g && g.phase === 'end') {
           this.game = null;
@@ -465,7 +432,6 @@ class Host {
     } else if (key === 'allcats') s.cats = Object.keys(CATEGORIES);
     else if (key === 'imposters') s.imposters = Math.max(1, Math.min(3, val | 0));
     else if (key === 'hint' && ['none', 'light', 'strong'].includes(val)) s.hint = val;
-    else if (key === 'guess') s.guess = !!val;
   }
 
   start() {
@@ -480,73 +446,17 @@ class Host {
     const { cat, e } = pick(pool);
     this.used.add(e.w);
     this.game = {
-      phase: 'reveal', cat, word: e.w, light: e.light, strong: e.strong,
-      hint: s.hint, guessOn: s.guess,
-      imposters: new Set(shuffle(ids).slice(0, k)), alive: new Set(ids), ready: new Set(),
-      roundNo: 1, votes: {}, result: null, winner: null
+      phase: 'play', cat, word: e.w, light: e.light, strong: e.strong, hint: s.hint,
+      imposters: new Set(shuffle(ids).slice(0, k))
     };
   }
 
-  checkReveal() {
-    const need = [...this.players.values()].filter(p => p.connected).map(p => p.id);
-    if (need.length && need.every(id => this.game.ready.has(id))) this.startTalk();
-  }
-  // Everyone talks in person. The app only waits until the host starts the vote.
-  startTalk() {
-    const g = this.game;
-    g.phase = 'talk'; g.votes = {};
-  }
-  checkVotes() {
-    const g = this.game;
-    const voters = [...g.alive].filter(id => { const p = this.players.get(id); return p && p.connected; });
-    if (!voters.length || voters.every(id => g.votes[id])) this.tally();
-  }
-  tally() {
-    const g = this.game, counts = {};
-    for (const to of Object.values(g.votes)) counts[to] = (counts[to] || 0) + 1;
-    const max = Math.max(0, ...Object.values(counts));
-    const top = Object.keys(counts).filter(id => counts[id] === max);
-    const tie = top.length !== 1;
-    const r = {
-      tie, eliminated: null, wasImposter: null, counts,
-      votes: Object.entries(g.votes).map(([from, to]) => ({ from, to })),
-      pendingGuess: false, guess: null, winner: null
-    };
-    if (!tie) {
-      r.eliminated = top[0]; g.alive.delete(r.eliminated);
-      r.wasImposter = g.imposters.has(r.eliminated);
-      if (r.wasImposter && g.guessOn) r.pendingGuess = true;
+  /* End the game for everyone: tell the friends first so they see a thank you, not a reconnect loop. */
+  close() {
+    for (const p of this.players.values()) {
+      if (p.conn && p.connected) { try { p.conn.send({ t: 'closed' }); } catch (e) { /* ignore */ } }
     }
-    g.result = r; g.phase = 'result';
-    if (!r.pendingGuess) r.winner = this.checkWin();
-  }
-  checkWin() {
-    const g = this.game;
-    const imp = [...g.alive].filter(id => g.imposters.has(id)).length;
-    const crew = g.alive.size - imp;
-    if (imp === 0) return 'crew';
-    if (imp >= crew) return 'imposters';
-    return null;
-  }
-  resolveGuess(text) {
-    const g = this.game, r = g.result;
-    const correct = !!text && norm(text) === norm(g.word);
-    r.guess = { text, correct, skipped: !text };
-    r.pendingGuess = false;
-    r.winner = correct ? 'imposters' : this.checkWin();
-  }
-  nextAfterResult() {
-    const g = this.game;
-    if (g.result.winner) { g.winner = g.result.winner; g.phase = 'end'; return; }
-    g.roundNo++; this.startTalk();
-  }
-
-  /* Called after any connection change so the game never gets stuck on someone who left. */
-  progress() {
-    const g = this.game;
-    if (!g) return;
-    if (g.phase === 'reveal') this.checkReveal();
-    else if (g.phase === 'vote') this.checkVotes();
+    setTimeout(() => { try { this.peer.destroy(); } catch (e) { /* ignore */ } }, 400);
   }
 }
 
@@ -645,6 +555,7 @@ function connectGuest(first) {
         store('session', 'pn_joined', code);
         me.tries = 0; ui.reconnecting = false; setView(msg.view);
       } else if (msg.t === 'toast') toast(msg.msg);
+      else if (msg.t === 'closed') hostEnded(me);
       else if (msg.t === 'error') giveUp(msg.msg);
     });
     conn.on('close', () => { clearTimeout(timer); retry('closed'); });
@@ -654,6 +565,15 @@ function connectGuest(first) {
     if (err.type === 'peer-unavailable') retry('peer-unavailable');
     else if (!me.conn || !me.conn.open) retry(err.type || 'error');
   });
+}
+
+function hostEnded(me) {
+  if (guest !== me) return;
+  me.leaving = true; try { me.peer.destroy(); } catch (e) { /* ignore */ }
+  guest = null; ui.view = null; ui.lastJson = ''; ui.reconnecting = false; ui.joinCode = '';
+  store('session', 'pn_joined', '');
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+  ui.screen = 'home'; ui.notice = 'The host ended the game. Thanks for playing!'; render();
 }
 
 function send(msg) {
@@ -668,7 +588,7 @@ function setView(v) {
   ui.lastJson = s;
   const prev = ui.view;
   ui.view = v; ui.screen = 'room';
-  if (v.phase === 'reveal' && (!prev || prev.phase !== 'reveal')) ui.showCard = false;
+  if (v.phase === 'play' && (!prev || prev.phase !== 'play')) ui.showCard = false;
   render();
 }
 
@@ -691,6 +611,7 @@ function homeHTML() {
     <div class="logo">🎭</div>
     <h1>Party Night</h1>
     <p class="sub">Social deduction games for you and your friends. Free, no accounts, nothing to install.</p>
+    ${ui.notice ? `<div class="banner good">${esc(ui.notice)}</div>` : ''}
     ${ui.error ? `<div class="banner bad">${esc(ui.error)}</div>` : ''}
     <section class="card">
       <label for="nameInput">Your name</label>
@@ -707,7 +628,7 @@ function homeHTML() {
         <button class="btn join" data-act="join">Join room</button>
       `}
     </section>
-    <p class="foot muted">Games: Imposter now, Werewolf and Mafia coming soon.</p>
+    <p class="foot muted">Games: Imposter now, Werewolf and Mafia coming soon.<br>Version 5</p>
   </div>`;
 }
 
@@ -725,10 +646,7 @@ function roomHTML() {
   let body = '';
   switch (V.phase) {
     case 'lobby': body = lobbyHTML(); break;
-    case 'reveal': body = revealHTML(); break;
-    case 'talk': body = talkHTML(); break;
-    case 'vote': body = voteHTML(); break;
-    case 'result': body = resultHTML(); break;
+    case 'play': body = playHTML(); break;
     case 'end': body = endHTML(); break;
   }
   return `<div class="wrap">
@@ -742,7 +660,7 @@ function roomHTML() {
     ${ui.reconnecting ? '<div class="banner warn">Connection lost. Trying to reconnect...</div>' : ''}
     ${V.me.isHost && V.hostOnline === false ? '<div class="banner warn">Your room went offline, so friends cannot join right now. Reconnecting...</div>' : ''}
     ${body}
-    <div style="text-align:center"><button class="link" data-act="leave">${V.me.isHost ? 'End room' : 'Leave room'}</button></div>
+    ${V.me.isHost && V.phase === 'end' ? '' : `<div style="text-align:center"><button class="link" data-act="leave">${V.me.isHost ? 'End game' : 'Leave room'}</button></div>`}
   </div>`;
 }
 
@@ -752,11 +670,7 @@ function playerRows(opts = {}) {
     const tags = [];
     if (p.isHost) tags.push('<span class="tag host">Host</span>');
     if (!p.connected) tags.push('<span class="tag bad">offline</span>');
-    if (opts.ready && V.ready.includes(p.id)) tags.push('<span class="tag good">ready</span>');
-    if (opts.voted && p.alive && V.voted.includes(p.id)) tags.push('<span class="tag good">voted</span>');
-    if (opts.life && !p.alive) tags.push('<span class="tag bad">out</span>');
-    const cls = (opts.life && !p.alive) ? 'out' : '';
-    return `<li class="${cls}">${avatar(p)}<span class="nm">${esc(p.name)}${p.id === V.me.id ? ' (you)' : ''}</span>${tags.join('')}</li>`;
+    return `<li>${avatar(p)}<span class="nm">${esc(p.name)}${p.id === V.me.id ? ' (you)' : ''}</span>${tags.join('')}</li>`;
   }).join('')}</ul>`;
 }
 
@@ -779,10 +693,8 @@ function lobbyHTML() {
       </div></div>
     <div class="setting"><label>Hint given to the imposter</label>
       <div class="seg">${['none', 'light', 'strong'].map(h => `<button class="${s.hint === h ? 'on' : ''}" data-act="set" data-key="hint" data-val="${h}">${{ none: 'None', light: 'Light', strong: 'Strong' }[h]}</button>`).join('')}</div></div>
-    <div class="setting"><label>Caught imposter gets one guess at the word</label>
-      <div class="seg">${[[true, 'On'], [false, 'Off']].map(([v, l]) => `<button class="${s.guess === v ? 'on' : ''}" data-act="set" data-key="guess" data-val="${v}">${l}</button>`).join('')}</div></div>
   ` : `<p class="muted">Categories: ${s.cats.length === V.allCats.length ? 'all' : esc(s.cats.join(', '))}.<br>
-      Imposters: ${s.imposters}. Hint for the imposter: ${hintLabel.toLowerCase()}. Final guess: ${s.guess ? 'on' : 'off'}.</p>`;
+      Imposters: ${s.imposters}. Hint for the imposter: ${hintLabel.toLowerCase()}.</p>`;
   return `
     <section class="card">
       <h2>Game</h2>
@@ -791,7 +703,7 @@ function lobbyHTML() {
         <button class="game" disabled>Werewolf<small>Coming soon</small></button>
         <button class="game" disabled>Mafia<small>Coming soon</small></button>
       </div>
-      <p class="muted" style="margin-top:10px">Everyone gets the same secret word, except the imposter. Talk it over in person, spot the bluffer, and vote them out.</p>
+      <p class="muted" style="margin-top:10px">Everyone gets the same secret word, except the imposter. The app only deals out the roles. You play and talk in person.</p>
     </section>
     <section class="card"><h2>Players (${n})</h2>${playerRows()}
       <p class="muted">Share the room code <b>${esc(V.code)}</b> or tap Invite to send the link.</p>
@@ -823,93 +735,29 @@ function secretHTML() {
   </section>`;
 }
 
-/* ----- reveal ----- */
-function revealHTML() {
-  const V = ui.view, me = V.me, ready = V.ready.includes(me.id);
-  return `<section class="card"><h2>Check your card</h2>
-      <p class="muted">Look at your secret card privately, then tap ready.</p></section>
-    ${secretHTML()}
-    <button class="btn primary" data-act="ready" ${ready ? 'disabled' : ''}>${ready ? 'Waiting for others...' : "I'm ready"}</button>
-    <section class="card"><h2>Players</h2>${playerRows({ ready: true })}</section>
-    ${me.isHost ? '<button class="btn" data-act="forceReady">Start anyway</button>' : ''}`;
-}
-
-/* ----- talk: all discussion happens in person, the app only waits ----- */
-function talkHTML() {
+/* ----- play: roles are dealt, everything else happens in person ----- */
+function playHTML() {
   const V = ui.view, me = V.me;
-  const meP = V.players.find(p => p.id === me.id);
-  const out = V.players.filter(p => !p.alive).map(p => esc(p.name));
-  return `<section class="card"><h2>Talk it out</h2>
-      <p>Everyone has their secret card. Discuss it in person and work out who the imposter is.</p>
-      ${out.length ? `<p class="muted">Voted out so far: ${out.join(', ')}.</p>` : ''}</section>
-    ${meP && meP.alive ? '' : '<div class="banner warn">You have been voted out. You can keep watching.</div>'}
+  return `<section class="card"><h2>Your role</h2>
+      <p>Check your secret card, then play in person. Keep it hidden from everyone else.</p></section>
     ${secretHTML()}
-    ${me.isHost ? '<button class="btn primary big" data-act="toVote">Start voting</button>' : '<p class="muted" style="text-align:center">The host starts the vote when everyone is ready.</p>'}`;
+    ${me.isHost ? '<button class="btn primary big" data-act="finish">Reveal roles</button>' : '<p class="muted" style="text-align:center">The host reveals the roles at the end of the round.</p>'}`;
 }
 
-/* ----- vote ----- */
-function voteHTML() {
-  const V = ui.view, me = V.me;
-  const meP = V.players.find(p => p.id === me.id), alive = V.players.filter(p => p.alive);
-  const aliveOnline = alive.filter(p => p.connected).length;
-  const votedCount = V.voted.length;
-  const options = meP && meP.alive
-    ? alive.filter(p => p.id !== me.id).map(p => `<button class="votebtn ${V.myVote === p.id ? 'sel' : ''}" data-act="vote" data-id="${esc(p.id)}">${avatar(p)}<span class="nm">${esc(p.name)}</span>${V.myVote === p.id ? '<span class="tag bad">your vote</span>' : ''}</button>`).join('')
-    : '<div class="banner warn">You have been voted out. Watch the others decide.</div>';
-  return `<section class="card"><h2>Who is the imposter?</h2>
-      <p class="muted">Pick the player you think is bluffing. You can change your vote until everyone has voted.</p>
-      ${options}
-      <p class="muted">${votedCount} of ${aliveOnline} votes in</p></section>
-    ${secretHTML()}
-    ${me.isHost ? '<button class="btn" data-act="tally">Count votes now</button>' : ''}`;
-}
-
-/* ----- result ----- */
-function resultHTML() {
-  const V = ui.view, r = V.result, me = V.me;
-  const name = id => (V.players.find(p => p.id === id) || { name: '?' }).name;
-  let h = '<section class="card">';
-  if (r.tie) h += '<h2>It is a tie</h2><p>Nobody is eliminated. Talk it out and try again.</p>';
-  else h += `<h2>${esc(name(r.eliminated))} was voted out</h2><p>${r.wasImposter ? '<span class="tag good">They were an imposter!</span>' : '<span class="tag bad">They were not the imposter.</span>'}</p>`;
-  const targets = Object.keys(r.counts).sort((a, b) => r.counts[b] - r.counts[a]);
-  if (targets.length) {
-    h += '<div class="recap"><h3>Votes</h3>' + targets.map(t =>
-      `<div class="c"><span>${esc(name(t))}</span><span>${r.counts[t]}</span></div><div class="muted" style="font-size:13px">from ${r.votes.filter(v => v.to === t).map(v => esc(name(v.from))).join(', ')}</div>`).join('') + '</div>';
-  }
-  h += '</section>';
-
-  if (r.pendingGuess) {
-    h += '<section class="card">';
-    if (r.eliminated === me.id) {
-      h += `<h2>Last chance</h2><p>You were caught, but you can still win. What is the secret word? (Category: <b>${esc(V.role.cat)}</b>)</p>
-        <div class="row"><input id="guessInput" maxlength="40" autocomplete="off" placeholder="Your guess" value="${esc(ui.drafts.guessInput || '')}"><button class="btn primary" data-act="guess">Guess</button></div>`;
-    } else h += `<h2>Last chance</h2><p><b>${esc(name(r.eliminated))}</b> gets one guess at the secret word...</p>`;
-    if (me.isHost) h += '<button class="btn" data-act="skipGuess">Skip the guess</button>';
-    h += '</section>';
-  } else if (r.guess) {
-    h += `<section class="card"><p>${r.guess.skipped ? 'No guess was made.' : `<b>${esc(name(r.eliminated))}</b> guessed "<b>${esc(r.guess.text)}</b>". That was ${r.guess.correct ? '<span class="tag good">correct</span>' : '<span class="tag bad">wrong</span>'}.`}</p></section>`;
-  }
-  if (r.winner) {
-    h += `<section class="card winner ${r.winner === 'imposters' ? 'imp' : ''}"><div class="big">${r.winner === 'crew' ? 'The crew is winning!' : 'The imposters are winning!'}</div></section>`;
-  }
-  if (me.isHost && !r.pendingGuess) h += `<button class="btn primary" data-act="next">${r.winner ? 'See final results' : 'Next round'}</button>`;
-  else if (!r.pendingGuess) h += '<p class="muted" style="text-align:center">Waiting for the host to continue...</p>';
-  return h;
-}
-
-/* ----- end ----- */
+/* ----- end: show the answer, then the host picks play again or end game ----- */
 function endHTML() {
   const V = ui.view, e = V.end, me = V.me;
   const name = id => (V.players.find(p => p.id === id) || { name: '?' }).name;
-  const crewWon = e.winner === 'crew';
-  return `<section class="card winner ${crewWon ? '' : 'imp'}">
-      <div class="big">${crewWon ? 'The crew wins!' : 'The imposters win!'}</div>
+  return `<section class="card winner">
+      <div class="big">Roles revealed</div>
       <p style="text-align:center">The secret word was</p>
       <div class="word" style="text-align:center">${esc(e.word)}</div>
       <p class="muted" style="text-align:center">Category: ${esc(e.cat)}</p>
       <p style="text-align:center">${e.imposters.length > 1 ? 'The imposters were' : 'The imposter was'} <b>${e.imposters.map(i => esc(name(i))).join(' and ')}</b></p>
     </section>
-    ${me.isHost ? '<button class="btn primary" data-act="again">Play again</button>' : '<p class="muted" style="text-align:center">Waiting for the host to start another round...</p>'}`;
+    ${me.isHost
+      ? '<button class="btn primary big" data-act="again">Play again</button><button class="btn" data-act="endgame">End game</button>'
+      : '<p class="muted" style="text-align:center">Waiting for the host to play again or end the game...</p>'}`;
 }
 
 /* ==========================================================================
@@ -928,8 +776,9 @@ function needName() {
 }
 
 const A = {
-  create() { if (needName()) createRoom(); },
+  create() { ui.notice = ''; if (needName()) createRoom(); },
   join() {
+    ui.notice = '';
     if (!needName()) return;
     const code = (ui.joinCode || ui.codeDraft || '').toUpperCase();
     if (!/^[A-Z]{4}$/.test(code)) { ui.error = 'Enter the 4 letter room code.'; render(); return; }
@@ -937,9 +786,10 @@ const A = {
   },
   clearcode() { ui.joinCode = ''; ui.error = ''; history.replaceState(null, '', location.pathname + location.search); render(); },
   leave() {
-    if (host && !confirm('End the room for everyone?')) return;
+    if (host && !confirm('End the game for everyone?')) return;
     try { store('session', 'pn_joined', ''); } catch (e) { /* ignore */ }
-    location.href = location.href.split('#')[0];
+    const go = () => { location.href = location.href.split('#')[0]; };
+    if (host) { host.close(); setTimeout(go, 600); } else go();
   },
   invite() {
     const code = ui.view.code, url = location.href.split('#')[0] + '#' + code;
@@ -952,15 +802,9 @@ const A = {
   },
   set(d) { send({ t: 'settings', key: d.key, val: parseVal(d.val) }); },
   start() { send({ t: 'start' }); },
-  ready() { send({ t: 'ready' }); },
-  forceReady() { send({ t: 'forceReady' }); },
   togglecard() { ui.showCard = !ui.showCard; render(); },
-  toVote() { send({ t: 'toVote' }); },
-  vote(d) { send({ t: 'vote', id: d.id }); },
-  tally() { send({ t: 'tally' }); },
-  guess() { const t = (ui.drafts.guessInput || '').trim(); if (!t) return; ui.drafts.guessInput = ''; send({ t: 'guess', text: t }); },
-  skipGuess() { send({ t: 'skipGuess' }); },
-  next() { send({ t: 'next' }); },
+  finish() { send({ t: 'finish' }); },
+  endgame() { A.leave(); },
   again() { send({ t: 'again' }); }
 };
 
@@ -979,8 +823,7 @@ document.addEventListener('input', e => {
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const id = e.target.id;
-  if (id === 'guessInput') A.guess();
-  else if (id === 'codeInput') A.join();
+  if (id === 'codeInput') A.join();
   else if (id === 'nameInput') (ui.joinCode ? A.join() : (ui.codeDraft ? A.join() : A.create()));
 });
 
