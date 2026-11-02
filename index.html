@@ -94,6 +94,9 @@ input:focus{border-color:var(--accent)}
 .joinbox{text-align:center;margin:16px 0 4px}
 .roomcode{display:inline-block;font-size:34px;font-weight:900;letter-spacing:8px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:6px 18px;margin-top:4px}
 .secret .role{text-align:center;padding:8px 0}
+.narr li{cursor:pointer}
+.script{padding-left:22px;margin:6px 0}
+.script li{margin:8px 0}
 .word{font-size:40px;font-weight:900;margin:8px 0;letter-spacing:.5px}
 .role.imp .tag{font-size:15px}
 .big{font-size:22px;font-weight:800;text-align:center;margin:6px 0 10px}
@@ -237,7 +240,61 @@ function store(kind, key, val) {
 }
 const PID = store('session', 'pn_pid') || (() => { const p = uid(); store('session', 'pn_pid', p); return p; })();
 
-const defaultSettings = () => ({ cats: Object.keys(CATEGORIES), imposters: 1, hint: 'light' });
+const defaultSettings = () => ({
+  game: 'imposter',
+  cats: Object.keys(CATEGORIES), imposters: 1, hint: 'light',
+  narrator: true,
+  werewolves: 'auto', ww: { seer: true, doctor: true, witch: false, hunter: false },
+  mafia: 'auto', mf: { detective: true, doctor: true }
+});
+
+/* Role sets for the two night games. The app only deals the roles. A narrator (usually the host) runs the nights in person. */
+const ROLE_SETS = {
+  werewolf: {
+    title: 'Werewolf', countKey: 'werewolves', optKey: 'ww', evil: 'werewolf', plain: 'villager', mateWord: 'pack',
+    teamName: { good: 'Villagers', evil: 'Werewolves' },
+    roles: {
+      villager: { name: 'Villager', team: 'good', blurb: 'You have no special power. Listen, talk, and work out who the werewolves are.' },
+      werewolf: { name: 'Werewolf', team: 'evil', blurb: 'Each night you and the other werewolves silently choose someone to eat. By day, act like a villager.' },
+      seer: { name: 'Seer', team: 'good', blurb: 'Each night the narrator lets you secretly point at one player and tells you if they are a werewolf.' },
+      doctor: { name: 'Doctor', team: 'good', blurb: 'Each night you secretly choose one player to protect from the werewolves. You may protect yourself.' },
+      witch: { name: 'Witch', team: 'good', blurb: 'You have one potion that saves the player the werewolves chose, and one that kills any player. Each can be used once.' },
+      hunter: { name: 'Hunter', team: 'good', blurb: 'If you are eliminated, you immediately take one other player down with you.' }
+    },
+    specials: ['seer', 'doctor', 'witch', 'hunter'],
+    win: 'Villagers win when every werewolf is gone. Werewolves win when they equal or outnumber the villagers.',
+    script: has => { const savers = [has.doctor && 'Doctor', has.witch && 'Witch'].filter(Boolean); return [
+      'Everyone closes their eyes.',
+      'Wake the werewolves. They silently point at a victim, then close their eyes.',
+      has.seer && 'Wake the Seer. They point at a player and you answer with a thumbs up (werewolf) or thumbs down. The Seer closes their eyes.',
+      has.doctor && 'Wake the Doctor. They point at the player to protect, then close their eyes.',
+      has.witch && 'Wake the Witch. Show them the victim. They may save that player and/or poison someone, then close their eyes.',
+      savers.length ? 'Everyone wakes up. Announce who was eaten, unless the ' + savers.join(' or the ') + ' saved them.' : 'Everyone wakes up. Announce who was eaten.',
+      has.hunter && 'If the Hunter is eliminated, they immediately take one player down with them.',
+      'Everyone discusses and votes someone out. Repeat from the top until one side wins.'
+    ].filter(Boolean); }
+  },
+  mafia: {
+    title: 'Mafia', countKey: 'mafia', optKey: 'mf', evil: 'mafia', plain: 'civilian', mateWord: 'family',
+    teamName: { good: 'Town', evil: 'Mafia' },
+    roles: {
+      civilian: { name: 'Civilian', team: 'good', blurb: 'You have no special power. Listen, talk, and help the town find the mafia.' },
+      mafia: { name: 'Mafia', team: 'evil', blurb: 'Each night you and the rest of the mafia silently agree on someone to kill. By day, act innocent.' },
+      detective: { name: 'Detective', team: 'good', blurb: 'Each night the narrator lets you secretly point at one player and tells you if they are mafia.' },
+      doctor: { name: 'Doctor', team: 'good', blurb: 'Each night you secretly choose one player to save from the mafia. You may save yourself.' }
+    },
+    specials: ['detective', 'doctor'],
+    win: 'Town wins when every mafia member is gone. The mafia wins when they equal or outnumber the town.',
+    script: has => { const savers = [has.doctor && 'Doctor'].filter(Boolean); return [
+      'Everyone closes their eyes.',
+      'Wake the mafia. They silently agree on a victim by pointing, then close their eyes.',
+      has.detective && 'Wake the Detective. They point at a player and you answer with a thumbs up (mafia) or thumbs down. The Detective closes their eyes.',
+      has.doctor && 'Wake the Doctor. They point at the player to save, then close their eyes.',
+      savers.length ? 'Everyone wakes up. Announce who was killed, unless the ' + savers.join(' or the ') + ' saved them.' : 'Everyone wakes up. Announce who was killed.',
+      'Everyone discusses and votes someone out. Repeat from the top until one side wins.'
+    ].filter(Boolean); }
+  }
+};
 
 let toastTimer;
 function toast(msg) {
@@ -259,6 +316,7 @@ const ui = {
   view: null,              // latest state view from the host
   lastJson: '',
   showCard: false,
+  dead: {},
   reconnecting: false
 };
 
@@ -391,12 +449,28 @@ class Host {
       phase: g ? g.phase : 'lobby',
       hostOnline: this.online
     };
-    if (g) {
+    if (g && g.kind) this.roleView(v, g, pid);
+    else if (g) {
       const imp = g.imposters.has(pid);
-      v.role = { imp, cat: g.cat, word: imp ? null : g.word, hint: imp && g.hint !== 'none' ? g[g.hint] : null };
+      v.role = { type: 'imposter', imp, cat: g.cat, word: imp ? null : g.word, hint: imp && g.hint !== 'none' ? g[g.hint] : null };
       if (g.phase === 'end') v.end = { word: g.word, cat: g.cat, imposters: [...g.imposters] };
     }
     return v;
+  }
+  // Werewolf and Mafia: each player only ever receives their own role. The narrator receives the full list.
+  roleView(v, g, pid) {
+    const def = ROLE_SETS[g.kind];
+    const nameOf = id => this.players.get(id).name;
+    const roster = Object.keys(g.assign).map(id => { const r = def.roles[g.assign[id]]; return { id, name: nameOf(id), roleName: r.name, team: r.team }; });
+    if (pid === g.narrator) {
+      const has = {}; for (const r of Object.values(g.assign)) has[r] = true;
+      v.narrator = { title: def.title, roster, script: def.script(has), win: def.win };
+    } else if (g.assign[pid]) {
+      const r = def.roles[g.assign[pid]];
+      const mates = r.team === 'evil' ? Object.keys(g.assign).filter(id => id !== pid && def.roles[g.assign[id]].team === 'evil').map(nameOf) : [];
+      v.role = { type: 'role', game: def.title, name: r.name, team: r.team, teamName: def.teamName[r.team], blurb: r.blurb, mates, mateWord: def.mateWord };
+    }   // anyone else (joined after the roles were dealt) just waits for the next round
+    if (g.phase === 'end') v.end = { kind: g.kind, title: def.title, roster, narrator: g.narrator ? nameOf(g.narrator) : null };
   }
   broadcast() {
     for (const p of this.players.values()) {
@@ -432,9 +506,36 @@ class Host {
     } else if (key === 'allcats') s.cats = Object.keys(CATEGORIES);
     else if (key === 'imposters') s.imposters = Math.max(1, Math.min(3, val | 0));
     else if (key === 'hint' && ['none', 'light', 'strong'].includes(val)) s.hint = val;
+    else if (key === 'game' && ['imposter', 'werewolf', 'mafia'].includes(val)) s.game = val;
+    else if (key === 'narrator') s.narrator = !!val;
+    else if (key === 'werewolves' || key === 'mafia') s[key] = val === 'auto' ? 'auto' : Math.max(1, Math.min(4, val | 0));
+    else if (key === 'wwrole' && ROLE_SETS.werewolf.specials.includes(val)) s.ww[val] = !s.ww[val];
+    else if (key === 'mfrole' && ROLE_SETS.mafia.specials.includes(val)) s.mf[val] = !s.mf[val];
   }
 
   start() {
+    if (this.settings.game === 'imposter') this.startImposter();
+    else this.startRoles(this.settings.game);
+  }
+  startRoles(kind) {
+    const s = this.settings, def = ROLE_SETS[kind], narrate = !!s.narrator;
+    const ids = [...this.players.values()].filter(p => p.connected && !(narrate && p.id === this.hostId)).map(p => p.id);
+    if (ids.length < 4) { this.notify(this.hostId, 'You need at least 4 players' + (narrate ? ' besides the narrator.' : '.')); return; }
+    const n = ids.length;
+    const evilCount = Math.min(s[def.countKey] === 'auto' ? Math.max(1, Math.round(n / 4)) : s[def.countKey], Math.floor((n - 1) / 2));
+    const list = Array(evilCount).fill(def.evil);
+    const skipped = [];
+    for (const r of def.specials) {
+      if (!s[def.optKey][r]) continue;
+      if (list.length < n - 1) list.push(r); else skipped.push(def.roles[r].name);   // always keep room for a plain player
+    }
+    while (list.length < n) list.push(def.plain);
+    const roles = shuffle(list), assign = {};
+    ids.forEach((id, i) => { assign[id] = roles[i]; });
+    this.game = { kind, phase: 'play', assign, narrator: narrate ? this.hostId : null };
+    if (skipped.length) this.notify(this.hostId, 'Not enough players for: ' + skipped.join(', '));
+  }
+  startImposter() {
     const ids = [...this.players.values()].filter(p => p.connected).map(p => p.id);
     if (ids.length < 3) { this.notify(this.hostId, 'You need at least 3 players.'); return; }
     const s = this.settings;
@@ -588,7 +689,7 @@ function setView(v) {
   ui.lastJson = s;
   const prev = ui.view;
   ui.view = v; ui.screen = 'room';
-  if (v.phase === 'play' && (!prev || prev.phase !== 'play')) ui.showCard = false;
+  if (v.phase === 'play' && (!prev || prev.phase !== 'play')) { ui.showCard = false; ui.dead = {}; }
   render();
 }
 
@@ -628,7 +729,7 @@ function homeHTML() {
         <button class="btn join" data-act="join">Join room</button>
       `}
     </section>
-    <p class="foot muted">Games: Imposter now, Werewolf and Mafia coming soon.<br>Version 6</p>
+    <p class="foot muted">Games: Imposter, Werewolf and Mafia.<br>Version 7</p>
   </div>`;
 }
 
@@ -679,7 +780,11 @@ function lobbyHTML() {
   const V = ui.view, s = V.settings, isHost = V.me.isHost, n = V.players.length;
   const maxImp = Math.max(1, Math.floor((n - 1) / 2));
   const hintLabel = { none: 'No hint', light: 'Light hint', strong: 'Strong hint' }[s.hint];
-  const settings = isHost ? `
+  const def = ROLE_SETS[s.game];
+  const seg = (key, cur, opts) => `<div class="seg">${opts.map(([val, label]) => `<button class="${cur === val ? 'on' : ''}" data-act="set" data-key="${key}" data-val="${val}">${label}</button>`).join('')}</div>`;
+  let settings;
+  if (s.game === 'imposter') {
+    settings = isHost ? `
     <div class="setting"><label>Categories (words are picked from these)</label>
       <div class="chips">
         ${V.allCats.map(c => `<button class="chipbtn ${s.cats.includes(c) ? 'on' : ''}" data-act="set" data-key="cat" data-val="${esc(c)}">${esc(c)}</button>`).join('')}
@@ -692,30 +797,57 @@ function lobbyHTML() {
         <button data-act="set" data-key="imposters" data-val="${s.imposters + 1}" ${s.imposters >= maxImp ? 'disabled' : ''}>+</button>
       </div></div>
     <div class="setting"><label>Hint given to the imposter</label>
-      <div class="seg">${['none', 'light', 'strong'].map(h => `<button class="${s.hint === h ? 'on' : ''}" data-act="set" data-key="hint" data-val="${h}">${{ none: 'None', light: 'Light', strong: 'Strong' }[h]}</button>`).join('')}</div></div>
+      ${seg('hint', s.hint, [['none', 'None'], ['light', 'Light'], ['strong', 'Strong']])}</div>
   ` : `<p class="muted">Categories: ${s.cats.length === V.allCats.length ? 'all' : esc(s.cats.join(', '))}.<br>
       Imposters: ${s.imposters}. Hint for the imposter: ${hintLabel.toLowerCase()}.</p>`;
+  } else {
+    const evilName = def.roles[def.evil].name + (s.game === 'werewolf' ? 's' : ' members');
+    const roleKey = s.game === 'werewolf' ? 'wwrole' : 'mfrole';
+    const on = def.specials.filter(r => s[def.optKey][r]).map(r => def.roles[r].name);
+    settings = isHost ? `
+    <div class="setting"><label>Host narrates and does not get a role</label>
+      ${seg('narrator', s.narrator, [[true, 'Yes'], [false, 'No']])}
+      <p class="muted" style="margin:8px 0 0">The narrator sees everyone's role and runs the nights in person.</p></div>
+    <div class="setting"><label>${evilName}</label>
+      ${seg(def.countKey, s[def.countKey], [['auto', 'Auto'], [1, '1'], [2, '2'], [3, '3']])}</div>
+    <div class="setting"><label>Special roles</label>
+      <div class="chips">${def.specials.map(r => `<button class="chipbtn ${s[def.optKey][r] ? 'on' : ''}" data-act="set" data-key="${roleKey}" data-val="${r}">${def.roles[r].name}</button>`).join('')}</div></div>
+  ` : `<p class="muted">${s.narrator ? 'The host narrates.' : 'Everyone gets a role.'} ${evilName}: ${s[def.countKey] === 'auto' ? 'automatic' : s[def.countKey]}.<br>
+      Special roles: ${on.length ? on.join(', ') : 'none'}.</p>`;
+  }
+  const game = (id, label) => isHost
+    ? `<button class="game ${s.game === id ? 'on' : ''}" data-act="set" data-key="game" data-val="${id}">${label}</button>`
+    : `<button class="game ${s.game === id ? 'on' : ''}" ${s.game === id ? '' : 'disabled'}>${label}</button>`;
+  const blurb = {
+    imposter: 'Everyone gets the same secret word, except the imposter. The app only deals out the roles. You play and talk in person.',
+    werewolf: 'Villagers hunt the hidden werewolves. The app only deals out the secret roles. The nights, the talking and the voting all happen in person.',
+    mafia: 'Town hunts the hidden mafia. The app only deals out the secret roles. The nights, the talking and the voting all happen in person.'
+  }[s.game];
+  const need = s.game === 'imposter' ? 3 : (s.narrator ? 5 : 4);
   return `
     <section class="card">
       <h2>Game</h2>
-      <div class="games">
-        <button class="game on">Imposter</button>
-        <button class="game" disabled>Werewolf<small>Coming soon</small></button>
-        <button class="game" disabled>Mafia<small>Coming soon</small></button>
-      </div>
-      <p class="muted" style="margin-top:10px">Everyone gets the same secret word, except the imposter. The app only deals out the roles. You play and talk in person.</p>
+      <div class="games">${game('imposter', 'Imposter')}${game('werewolf', 'Werewolf')}${game('mafia', 'Mafia')}</div>
+      <p class="muted" style="margin-top:10px">${blurb}</p>
     </section>
     <section class="card"><h2>Players (${n})</h2>${playerRows()}
       <p class="muted">Share the room code <b>${esc(V.code)}</b> or tap Invite to send the link.</p>
       ${isHost ? '<p class="muted">Keep this page open while friends join. On a phone, come back to this page before they try to join.</p>' : ''}</section>
     <section class="card"><h2>Settings</h2>${settings}</section>
     ${isHost
-      ? `<button class="btn primary" data-act="start" ${n < 3 ? 'disabled' : ''}>${n < 3 ? 'Need at least 3 players' : 'Start game'}</button>`
+      ? `<button class="btn primary" data-act="start" ${n < need ? 'disabled' : ''}>${n < need ? 'Need at least ' + need + ' players' + (s.game !== 'imposter' && s.narrator ? ' (the host narrates)' : '') : 'Start game'}</button>`
       : '<p class="muted" style="text-align:center">Waiting for the host to start...</p>'}`;
 }
 
 /* ----- secret card ----- */
 function roleHTML(r) {
+  if (r.type === 'role') {
+    const evil = r.team === 'evil';
+    return `<div class="role ${evil ? 'imp' : ''}"><span class="tag ${evil ? 'bad' : 'good'}">${esc(r.teamName)}</span>
+      <div class="word">${esc(r.name)}</div>
+      <p class="muted">${esc(r.blurb)}</p>
+      ${r.mates.length ? `<p>Your ${esc(r.mateWord)}: <b>${r.mates.map(m => esc(m)).join(', ')}</b></p>` : ''}</div>`;
+  }
   if (r.imp) {
     return `<div class="role imp"><span class="tag bad">You are the IMPOSTER</span>
       <p>Category: <b>${esc(r.cat)}</b></p>
@@ -736,18 +868,43 @@ function secretHTML() {
 }
 
 /* ----- play: roles are dealt, everything else happens in person ----- */
+function narratorHTML() {
+  const V = ui.view, nr = V.narrator;
+  const rows = nr.roster.map(p => `<li class="${ui.dead[p.id] ? 'out' : ''}" data-act="mark" data-id="${esc(p.id)}">${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="tag ${p.team === 'evil' ? 'bad' : 'good'}">${esc(p.roleName)}</span></li>`).join('');
+  return `<section class="card"><h2>You are the narrator</h2>
+      <p>You do not get a role. Run the nights in person and keep this screen hidden from the players.</p></section>
+    <section class="card secret"><div class="row between"><b>Who is who</b><button class="btn small" data-act="togglecard">${ui.showCard ? 'Hide' : 'Show'}</button></div>
+      ${ui.showCard ? `<ul class="plist narr">${rows}</ul><p class="muted">Tap a name to cross out a player who is out.</p>` : '<p class="muted">Hidden. Make sure nobody is looking, then tap Show.</p>'}</section>
+    <section class="card"><h2>Each night</h2><ol class="script">${nr.script.map(x => `<li>${esc(x)}</li>`).join('')}</ol>
+      <p class="muted">${esc(nr.win)}</p></section>`;
+}
 function playHTML() {
   const V = ui.view, me = V.me;
+  const finish = me.isHost ? '<button class="btn primary big" data-act="finish">Reveal roles</button>' : '<p class="muted" style="text-align:center">The host reveals the roles at the end of the round.</p>';
+  if (V.narrator) return narratorHTML() + finish;
+  if (!V.role) return `<section class="card"><h2>Next round</h2><p>You joined after the roles were dealt. You will get a role in the next round.</p></section>${finish}`;
   return `<section class="card"><h2>Your role</h2>
       <p>Check your secret card, then play in person. Keep it hidden from everyone else.</p></section>
     ${secretHTML()}
-    ${me.isHost ? '<button class="btn primary big" data-act="finish">Reveal roles</button>' : '<p class="muted" style="text-align:center">The host reveals the roles at the end of the round.</p>'}`;
+    ${finish}`;
 }
 
 /* ----- end: show the answer, then the host picks play again or end game ----- */
 function endHTML() {
   const V = ui.view, e = V.end, me = V.me;
   const name = id => (V.players.find(p => p.id === id) || { name: '?' }).name;
+  const buttons = me.isHost
+    ? '<button class="btn primary big" data-act="again">Play again</button><button class="btn" data-act="endgame">End game</button>'
+    : '<p class="muted" style="text-align:center">Waiting for the host to play again or end the game...</p>';
+  if (e.roster) {
+    const rows = e.roster.map(p => `<li>${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="tag ${p.team === 'evil' ? 'bad' : 'good'}">${esc(p.roleName)}</span></li>`).join('');
+    return `<section class="card winner">
+        <div class="big">Roles revealed</div>
+        ${e.narrator ? `<p class="muted" style="text-align:center">Narrator: ${esc(e.narrator)}</p>` : ''}
+        <ul class="plist">${rows}</ul>
+      </section>
+      ${buttons}`;
+  }
   return `<section class="card winner">
       <div class="big">Roles revealed</div>
       <p style="text-align:center">The secret word was</p>
@@ -755,9 +912,7 @@ function endHTML() {
       <p class="muted" style="text-align:center">Category: ${esc(e.cat)}</p>
       <p style="text-align:center">${e.imposters.length > 1 ? 'The imposters were' : 'The imposter was'} <b>${e.imposters.map(i => esc(name(i))).join(' and ')}</b></p>
     </section>
-    ${me.isHost
-      ? '<button class="btn primary big" data-act="again">Play again</button><button class="btn" data-act="endgame">End game</button>'
-      : '<p class="muted" style="text-align:center">Waiting for the host to play again or end the game...</p>'}`;
+    ${buttons}`;
 }
 
 /* ==========================================================================
@@ -803,6 +958,7 @@ const A = {
   set(d) { send({ t: 'settings', key: d.key, val: parseVal(d.val) }); },
   start() { send({ t: 'start' }); },
   togglecard() { ui.showCard = !ui.showCard; render(); },
+  mark(d) { ui.dead[d.id] = !ui.dead[d.id]; render(); },
   finish() { send({ t: 'finish' }); },
   endgame() { A.leave(); },
   again() { send({ t: 'again' }); }
