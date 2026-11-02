@@ -88,6 +88,7 @@ input:focus{border-color:var(--accent)}
 .tag.good{background:#14382b;color:#7cf0bd}
 .tag.bad{background:#3a1a24;color:#ff9aa8}
 .tag.host{background:#2a2160;color:#c9bcff}
+.tag.neutral{background:#3a2e14;color:#ffd58a}
 .btn.big{font-size:18px;padding:16px}
 .btn.join{background:linear-gradient(135deg,#19c3a3,#3ddc97);color:#06281d;border:none;font-size:18px;font-weight:800;padding:16px}
 .codeinput{text-align:center;letter-spacing:8px;font-size:24px;font-weight:800;text-transform:uppercase}
@@ -244,27 +245,31 @@ const defaultSettings = () => ({
   game: 'imposter',
   cats: Object.keys(CATEGORIES), imposters: 1, hint: 'light',
   narrator: true,
-  werewolves: 'auto', ww: { seer: true, doctor: true, witch: false, hunter: false },
-  mafia: 'auto', mf: { detective: true, doctor: true }
+  werewolves: 'auto', ww: { seer: true, doctor: true, witch: false, hunter: false, cupid: false, mason: false, tanner: false },
+  mafia: 'auto', mf: { detective: true, doctor: true, godfather: false, vigilante: false, bodyguard: false, escort: false, jester: false }
 });
 
 /* Role sets for the two night games. The app only deals the roles. A narrator (usually the host) runs the nights in person. */
 const ROLE_SETS = {
   werewolf: {
     title: 'Werewolf', countKey: 'werewolves', optKey: 'ww', evil: 'werewolf', plain: 'villager', mateWord: 'pack',
-    teamName: { good: 'Villagers', evil: 'Werewolves' },
+    teamName: { good: 'Villagers', evil: 'Werewolves', neutral: 'On your own' },
     roles: {
       villager: { name: 'Villager', team: 'good', blurb: 'You have no special power. Listen, talk, and work out who the werewolves are.' },
       werewolf: { name: 'Werewolf', team: 'evil', blurb: 'Each night you and the other werewolves silently choose someone to eat. By day, act like a villager.' },
       seer: { name: 'Seer', team: 'good', blurb: 'Each night the narrator lets you secretly point at one player and tells you if they are a werewolf.' },
       doctor: { name: 'Doctor', team: 'good', blurb: 'Each night you secretly choose one player to protect from the werewolves. You may protect yourself.' },
       witch: { name: 'Witch', team: 'good', blurb: 'You have one potion that saves the player the werewolves chose, and one that kills any player. Each can be used once.' },
-      hunter: { name: 'Hunter', team: 'good', blurb: 'If you are eliminated, you immediately take one other player down with you.' }
+      hunter: { name: 'Hunter', team: 'good', blurb: 'If you are eliminated, you immediately take one other player down with you.' },
+      cupid: { name: 'Cupid', team: 'good', blurb: 'On the first night the narrator lets you secretly choose two players to be lovers. If one lover is eliminated, the other is too.' },
+      mason: { name: 'Mason', chip: 'Masons (2)', team: 'good', group: 'mason', count: 2, mateWord: 'fellow Mason', blurb: 'You have no special power, but you know the other Mason is on the village side. Trust them.' },
+      tanner: { name: 'Tanner', team: 'neutral', blurb: 'You want to be eliminated. If the village votes you out, you win alone. Act suspicious, but not too much.', winNote: 'The Tanner wins alone if the village votes them out.' }
     },
-    specials: ['seer', 'doctor', 'witch', 'hunter'],
+    specials: ['seer', 'doctor', 'witch', 'hunter', 'cupid', 'mason', 'tanner'],
     win: 'Villagers win when every werewolf is gone. Werewolves win when they equal or outnumber the villagers.',
     script: has => { const savers = [has.doctor && 'Doctor', has.witch && 'Witch'].filter(Boolean); return [
       'Everyone closes their eyes.',
+      has.cupid && 'First night only: wake Cupid. They point at two players, who become lovers. Quietly tap the two lovers so they know, then Cupid closes their eyes. If one lover is eliminated, the other is too.',
       'Wake the werewolves. They silently point at a victim, then close their eyes.',
       has.seer && 'Wake the Seer. They point at a player and you answer with a thumbs up (werewolf) or thumbs down. The Seer closes their eyes.',
       has.doctor && 'Wake the Doctor. They point at the player to protect, then close their eyes.',
@@ -276,21 +281,29 @@ const ROLE_SETS = {
   },
   mafia: {
     title: 'Mafia', countKey: 'mafia', optKey: 'mf', evil: 'mafia', plain: 'civilian', mateWord: 'family',
-    teamName: { good: 'Town', evil: 'Mafia' },
+    teamName: { good: 'Town', evil: 'Mafia', neutral: 'On your own' },
     roles: {
       civilian: { name: 'Civilian', team: 'good', blurb: 'You have no special power. Listen, talk, and help the town find the mafia.' },
       mafia: { name: 'Mafia', team: 'evil', blurb: 'Each night you and the rest of the mafia silently agree on someone to kill. By day, act innocent.' },
       detective: { name: 'Detective', team: 'good', blurb: 'Each night the narrator lets you secretly point at one player and tells you if they are mafia.' },
-      doctor: { name: 'Doctor', team: 'good', blurb: 'Each night you secretly choose one player to save from the mafia. You may save yourself.' }
+      doctor: { name: 'Doctor', team: 'good', blurb: 'Each night you secretly choose one player to save from the mafia. You may save yourself.' },
+      godfather: { name: 'Godfather', team: 'evil', replaces: 'mafia', blurb: 'You lead the mafia. The Detective sees you as innocent. Each night you choose the victim together with the rest of the mafia.' },
+      vigilante: { name: 'Vigilante', team: 'good', blurb: 'Once per game, at night, you may secretly point at a player and the narrator takes them out. Use it wisely.' },
+      bodyguard: { name: 'Bodyguard', team: 'good', blurb: 'Each night you secretly choose one player to guard. If the mafia attack them, you die instead and they live.' },
+      escort: { name: 'Escort', team: 'good', blurb: 'Each night you secretly choose one player. They cannot use their ability that night.' },
+      jester: { name: 'Jester', team: 'neutral', blurb: 'You want to be eliminated. If the town votes you out, you win alone. Act suspicious, but not too much.', winNote: 'The Jester wins alone if the town votes them out.' }
     },
-    specials: ['detective', 'doctor'],
+    specials: ['detective', 'doctor', 'godfather', 'vigilante', 'bodyguard', 'escort', 'jester'],
     win: 'Town wins when every mafia member is gone. The mafia wins when they equal or outnumber the town.',
     script: has => { const savers = [has.doctor && 'Doctor'].filter(Boolean); return [
       'Everyone closes their eyes.',
       'Wake the mafia. They silently agree on a victim by pointing, then close their eyes.',
-      has.detective && 'Wake the Detective. They point at a player and you answer with a thumbs up (mafia) or thumbs down. The Detective closes their eyes.',
+      has.escort && 'Wake the Escort. They point at a player who cannot use their ability tonight, then close their eyes.',
+      has.detective && ('Wake the Detective. They point at a player and you answer with a thumbs up (mafia) or thumbs down. The Detective closes their eyes.' + (has.godfather ? ' The Godfather counts as thumbs down, not mafia.' : '')),
       has.doctor && 'Wake the Doctor. They point at the player to save, then close their eyes.',
-      savers.length ? 'Everyone wakes up. Announce who was killed, unless the ' + savers.join(' or the ') + ' saved them.' : 'Everyone wakes up. Announce who was killed.',
+      has.bodyguard && 'Wake the Bodyguard. They point at the player to guard, then close their eyes.',
+      has.vigilante && 'Wake the Vigilante, only if they have not used their one shot yet. They may point at a player to take out, then close their eyes.',
+      (savers.length ? 'Everyone wakes up. Announce who was killed, unless the ' + savers.join(' or the ') + ' saved them.' : 'Everyone wakes up. Announce who was killed.') + (has.bodyguard ? ' If the Bodyguard guarded the victim, the Bodyguard dies instead.' : ''),
       'Everyone discusses and votes someone out. Repeat from the top until one side wins.'
     ].filter(Boolean); }
   }
@@ -464,11 +477,13 @@ class Host {
     const roster = Object.keys(g.assign).map(id => { const r = def.roles[g.assign[id]]; return { id, name: nameOf(id), roleName: r.name, team: r.team }; });
     if (pid === g.narrator) {
       const has = {}; for (const r of Object.values(g.assign)) has[r] = true;
-      v.narrator = { title: def.title, roster, script: def.script(has), win: def.win };
+      const win = [def.win, ...Object.keys(has).map(r => def.roles[r].winNote)].filter(Boolean).join(' ');
+      v.narrator = { title: def.title, roster, script: def.script(has), win };
     } else if (g.assign[pid]) {
       const r = def.roles[g.assign[pid]];
-      const mates = r.team === 'evil' ? Object.keys(g.assign).filter(id => id !== pid && def.roles[g.assign[id]].team === 'evil').map(nameOf) : [];
-      v.role = { type: 'role', game: def.title, name: r.name, team: r.team, teamName: def.teamName[r.team], blurb: r.blurb, mates, mateWord: def.mateWord };
+      const grp = x => x.group || (x.team === 'evil' ? 'evil' : null);   // who recognises whom: the evil side, or the Masons
+      const mates = grp(r) ? Object.keys(g.assign).filter(id => id !== pid && grp(def.roles[g.assign[id]]) === grp(r)).map(nameOf) : [];
+      v.role = { type: 'role', game: def.title, name: r.name, team: r.team, teamName: def.teamName[r.team], blurb: r.blurb, mates, mateWord: r.mateWord || def.mateWord };
     }   // anyone else (joined after the roles were dealt) just waits for the next round
     if (g.phase === 'end') v.end = { kind: g.kind, title: def.title, roster, narrator: g.narrator ? nameOf(g.narrator) : null };
   }
@@ -527,7 +542,15 @@ class Host {
     const skipped = [];
     for (const r of def.specials) {
       if (!s[def.optKey][r]) continue;
-      if (list.length < n - 1) list.push(r); else skipped.push(def.roles[r].name);   // always keep room for a plain player
+      const role = def.roles[r];
+      if (role.replaces) {                          // for example the Godfather takes the place of one mafia member
+        const i = list.indexOf(role.replaces);
+        if (i >= 0) list[i] = r; else skipped.push(role.name);
+        continue;
+      }
+      const need = role.count || 1;                 // for example the Masons come as a pair
+      if (list.length + need <= n - 1) for (let k = 0; k < need; k++) list.push(r);   // always keep room for a plain player
+      else skipped.push(role.name);
     }
     while (list.length < n) list.push(def.plain);
     const roles = shuffle(list), assign = {};
@@ -729,7 +752,7 @@ function homeHTML() {
         <button class="btn join" data-act="join">Join room</button>
       `}
     </section>
-    <p class="foot muted">Games: Imposter, Werewolf and Mafia.<br>Version 7</p>
+    <p class="foot muted">Games: Imposter, Werewolf and Mafia.<br>Version 8</p>
   </div>`;
 }
 
@@ -803,7 +826,7 @@ function lobbyHTML() {
   } else {
     const evilName = def.roles[def.evil].name + (s.game === 'werewolf' ? 's' : ' members');
     const roleKey = s.game === 'werewolf' ? 'wwrole' : 'mfrole';
-    const on = def.specials.filter(r => s[def.optKey][r]).map(r => def.roles[r].name);
+    const on = def.specials.filter(r => s[def.optKey][r]).map(r => def.roles[r].chip || def.roles[r].name);
     settings = isHost ? `
     <div class="setting"><label>Host narrates and does not get a role</label>
       ${seg('narrator', s.narrator, [[true, 'Yes'], [false, 'No']])}
@@ -811,7 +834,7 @@ function lobbyHTML() {
     <div class="setting"><label>${evilName}</label>
       ${seg(def.countKey, s[def.countKey], [['auto', 'Auto'], [1, '1'], [2, '2'], [3, '3']])}</div>
     <div class="setting"><label>Special roles</label>
-      <div class="chips">${def.specials.map(r => `<button class="chipbtn ${s[def.optKey][r] ? 'on' : ''}" data-act="set" data-key="${roleKey}" data-val="${r}">${def.roles[r].name}</button>`).join('')}</div></div>
+      <div class="chips">${def.specials.map(r => `<button class="chipbtn ${s[def.optKey][r] ? 'on' : ''}" data-act="set" data-key="${roleKey}" data-val="${r}">${def.roles[r].chip || def.roles[r].name}</button>`).join('')}</div></div>
   ` : `<p class="muted">${s.narrator ? 'The host narrates.' : 'Everyone gets a role.'} ${evilName}: ${s[def.countKey] === 'auto' ? 'automatic' : s[def.countKey]}.<br>
       Special roles: ${on.length ? on.join(', ') : 'none'}.</p>`;
   }
@@ -840,10 +863,11 @@ function lobbyHTML() {
 }
 
 /* ----- secret card ----- */
+function teamClass(t) { return t === 'evil' ? 'bad' : t === 'neutral' ? 'neutral' : 'good'; }
 function roleHTML(r) {
   if (r.type === 'role') {
     const evil = r.team === 'evil';
-    return `<div class="role ${evil ? 'imp' : ''}"><span class="tag ${evil ? 'bad' : 'good'}">${esc(r.teamName)}</span>
+    return `<div class="role ${evil ? 'imp' : ''}"><span class="tag ${teamClass(r.team)}">${esc(r.teamName)}</span>
       <div class="word">${esc(r.name)}</div>
       <p class="muted">${esc(r.blurb)}</p>
       ${r.mates.length ? `<p>Your ${esc(r.mateWord)}: <b>${r.mates.map(m => esc(m)).join(', ')}</b></p>` : ''}</div>`;
@@ -870,7 +894,7 @@ function secretHTML() {
 /* ----- play: roles are dealt, everything else happens in person ----- */
 function narratorHTML() {
   const V = ui.view, nr = V.narrator;
-  const rows = nr.roster.map(p => `<li class="${ui.dead[p.id] ? 'out' : ''}" data-act="mark" data-id="${esc(p.id)}">${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="tag ${p.team === 'evil' ? 'bad' : 'good'}">${esc(p.roleName)}</span></li>`).join('');
+  const rows = nr.roster.map(p => `<li class="${ui.dead[p.id] ? 'out' : ''}" data-act="mark" data-id="${esc(p.id)}">${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="tag ${teamClass(p.team)}">${esc(p.roleName)}</span></li>`).join('');
   return `<section class="card"><h2>You are the narrator</h2>
       <p>You do not get a role. Run the nights in person and keep this screen hidden from the players.</p></section>
     <section class="card secret"><div class="row between"><b>Who is who</b><button class="btn small" data-act="togglecard">${ui.showCard ? 'Hide' : 'Show'}</button></div>
@@ -897,7 +921,7 @@ function endHTML() {
     ? '<button class="btn primary big" data-act="again">Play again</button><button class="btn" data-act="endgame">End game</button>'
     : '<p class="muted" style="text-align:center">Waiting for the host to play again or end the game...</p>';
   if (e.roster) {
-    const rows = e.roster.map(p => `<li>${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="tag ${p.team === 'evil' ? 'bad' : 'good'}">${esc(p.roleName)}</span></li>`).join('');
+    const rows = e.roster.map(p => `<li>${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="tag ${teamClass(p.team)}">${esc(p.roleName)}</span></li>`).join('');
     return `<section class="card winner">
         <div class="big">Roles revealed</div>
         ${e.narrator ? `<p class="muted" style="text-align:center">Narrator: ${esc(e.narrator)}</p>` : ''}
