@@ -88,7 +88,11 @@ input:focus{border-color:var(--accent)}
 .tag.good{background:#14382b;color:#7cf0bd}
 .tag.bad{background:#3a1a24;color:#ff9aa8}
 .tag.host{background:#2a2160;color:#c9bcff}
-.clue{margin-left:auto;font-weight:700;color:#d9d2ff;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn.big{font-size:18px;padding:16px}
+.btn.join{background:linear-gradient(135deg,#19c3a3,#3ddc97);color:#06281d;border:none;font-size:18px;font-weight:800;padding:16px}
+.codeinput{text-align:center;letter-spacing:8px;font-size:24px;font-weight:800;text-transform:uppercase}
+.joinbox{text-align:center;margin:16px 0 4px}
+.roomcode{display:inline-block;font-size:34px;font-weight:900;letter-spacing:8px;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:6px 18px;margin-top:4px}
 .votebtn{
   display:flex;align-items:center;gap:10px;width:100%;text-align:left;
   appearance:none;border:2px solid var(--line);background:#10142a;color:var(--ink);
@@ -242,7 +246,7 @@ function store(kind, key, val) {
 }
 const PID = store('session', 'pn_pid') || (() => { const p = uid(); store('session', 'pn_pid', p); return p; })();
 
-const defaultSettings = () => ({ cats: Object.keys(CATEGORIES), imposters: 1, hint: 'light', rounds: 1, guess: true });
+const defaultSettings = () => ({ cats: Object.keys(CATEGORIES), imposters: 1, hint: 'light', guess: true });
 
 let toastTimer;
 function toast(msg) {
@@ -402,12 +406,8 @@ class Host {
     if (g) {
       const imp = g.imposters.has(pid);
       v.role = { imp, cat: g.cat, word: imp ? null : g.word, hint: imp && g.hint !== 'none' ? g[g.hint] : null };
-      v.roundNo = g.roundNo; v.rounds = g.rounds;
-      v.voteAfter = g.roundNo + (g.rounds - g.pass);
+      v.roundNo = g.roundNo;
       v.ready = [...g.ready];
-      v.order = g.order;
-      v.turn = g.phase === 'clues' ? (g.order[g.turn] || null) : null;
-      v.clues = g.clues;
       v.voted = Object.keys(g.votes);
       v.myVote = g.votes[pid] || null;
       if (g.phase === 'result' || g.phase === 'end') v.result = g.result;
@@ -432,15 +432,8 @@ class Host {
       case 'ready':
         if (g && g.phase === 'reveal') { g.ready.add(pid); this.checkReveal(); }
         break;
-      case 'forceReady': if (isHost && g && g.phase === 'reveal') this.startClues(); break;
-      case 'clue':
-        if (g && g.phase === 'clues' && g.order[g.turn] === pid) {
-          const text = String(msg.text || '').replace(/\s+/g, ' ').trim().slice(0, 30);
-          if (text) { g.clues.push({ pid, text, round: g.roundNo }); this.advance(); }
-        }
-        break;
-      case 'skip': if (isHost && g && g.phase === 'clues') this.advance(); break;
-      case 'toVote': if (isHost && g && g.phase === 'clues') { g.phase = 'vote'; g.votes = {}; } break;
+      case 'forceReady': if (isHost && g && g.phase === 'reveal') this.startTalk(); break;
+      case 'toVote': if (isHost && g && g.phase === 'talk') { g.phase = 'vote'; g.votes = {}; } break;
       case 'vote':
         if (g && g.phase === 'vote' && g.alive.has(pid) && g.alive.has(msg.id) && msg.id !== pid) {
           g.votes[pid] = msg.id; this.checkVotes();
@@ -472,7 +465,6 @@ class Host {
     } else if (key === 'allcats') s.cats = Object.keys(CATEGORIES);
     else if (key === 'imposters') s.imposters = Math.max(1, Math.min(3, val | 0));
     else if (key === 'hint' && ['none', 'light', 'strong'].includes(val)) s.hint = val;
-    else if (key === 'rounds') s.rounds = Math.max(1, Math.min(3, val | 0));
     else if (key === 'guess') s.guess = !!val;
   }
 
@@ -489,34 +481,20 @@ class Host {
     this.used.add(e.w);
     this.game = {
       phase: 'reveal', cat, word: e.w, light: e.light, strong: e.strong,
-      hint: s.hint, rounds: s.rounds, guessOn: s.guess,
+      hint: s.hint, guessOn: s.guess,
       imposters: new Set(shuffle(ids).slice(0, k)), alive: new Set(ids), ready: new Set(),
-      order: [], turn: 0, pass: 1, roundNo: 1, clues: [], votes: {}, result: null, winner: null
+      roundNo: 1, votes: {}, result: null, winner: null
     };
   }
 
   checkReveal() {
     const need = [...this.players.values()].filter(p => p.connected).map(p => p.id);
-    if (need.length && need.every(id => this.game.ready.has(id))) this.startClues();
+    if (need.length && need.every(id => this.game.ready.has(id))) this.startTalk();
   }
-  startClues() {
+  // Everyone talks in person. The app only waits until the host starts the vote.
+  startTalk() {
     const g = this.game;
-    g.phase = 'clues'; g.order = shuffle([...g.alive]); g.turn = -1; g.pass = 1;
-    this.advance();
-  }
-  // Move to the next connected speaker, next pass, or voting.
-  advance() {
-    const g = this.game;
-    g.turn++;
-    for (;;) {
-      if (g.turn >= g.order.length) {
-        if (g.pass >= g.rounds) { g.phase = 'vote'; g.votes = {}; return; }
-        g.pass++; g.roundNo++; g.turn = 0;
-      }
-      const p = this.players.get(g.order[g.turn]);
-      if (p && p.connected) return;
-      g.turn++;
-    }
+    g.phase = 'talk'; g.votes = {};
   }
   checkVotes() {
     const g = this.game;
@@ -560,7 +538,7 @@ class Host {
   nextAfterResult() {
     const g = this.game;
     if (g.result.winner) { g.winner = g.result.winner; g.phase = 'end'; return; }
-    g.roundNo++; g.votes = {}; this.startClues();
+    g.roundNo++; this.startTalk();
   }
 
   /* Called after any connection change so the game never gets stuck on someone who left. */
@@ -568,7 +546,6 @@ class Host {
     const g = this.game;
     if (!g) return;
     if (g.phase === 'reveal') this.checkReveal();
-    else if (g.phase === 'clues') { const p = this.players.get(g.order[g.turn]); if (!p || !p.connected) this.advance(); }
     else if (g.phase === 'vote') this.checkVotes();
   }
 }
@@ -719,16 +696,15 @@ function homeHTML() {
       <label for="nameInput">Your name</label>
       <input id="nameInput" maxlength="16" autocomplete="nickname" placeholder="Your name" value="${esc(ui.name)}">
       ${joining ? `
-        <p class="muted" style="margin-top:14px">You are joining room <b>${esc(ui.joinCode)}</b></p>
-        <button class="btn primary" data-act="join">Join room</button>
+        <div class="joinbox"><div class="muted">You are joining room</div><div class="roomcode">${esc(ui.joinCode)}</div></div>
+        <button class="btn join" data-act="join">Join room</button>
         <div style="text-align:center"><button class="link" data-act="clearcode">Create my own room instead</button></div>
       ` : `
-        <button class="btn primary" data-act="create">Create a room</button>
+        <button class="btn primary big" data-act="create">Create a room</button>
         <div class="or">or join a friend's room</div>
-        <div class="row">
-          <input id="codeInput" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="CODE" value="${esc(ui.codeDraft)}" style="text-transform:uppercase;letter-spacing:4px;text-align:center">
-          <button class="btn" data-act="join">Join</button>
-        </div>
+        <label for="codeInput">Room code</label>
+        <input id="codeInput" class="codeinput" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="CODE" value="${esc(ui.codeDraft)}">
+        <button class="btn join" data-act="join">Join room</button>
       `}
     </section>
     <p class="foot muted">Games: Imposter now, Werewolf and Mafia coming soon.</p>
@@ -750,7 +726,7 @@ function roomHTML() {
   switch (V.phase) {
     case 'lobby': body = lobbyHTML(); break;
     case 'reveal': body = revealHTML(); break;
-    case 'clues': body = cluesHTML(); break;
+    case 'talk': body = talkHTML(); break;
     case 'vote': body = voteHTML(); break;
     case 'result': body = resultHTML(); break;
     case 'end': body = endHTML(); break;
@@ -772,21 +748,15 @@ function roomHTML() {
 
 function playerRows(opts = {}) {
   const V = ui.view;
-  let list = V.players;
-  if (opts.order) {   // show players in the real speaking order, anyone not in it (voted out) at the end
-    const pos = id => { const i = opts.order.indexOf(id); return i < 0 ? 999 : i; };
-    list = V.players.slice().sort((a, b) => pos(a.id) - pos(b.id));
-  }
-  return `<ul class="plist">${list.map(p => {
+  return `<ul class="plist">${V.players.map(p => {
     const tags = [];
     if (p.isHost) tags.push('<span class="tag host">Host</span>');
     if (!p.connected) tags.push('<span class="tag bad">offline</span>');
     if (opts.ready && V.ready.includes(p.id)) tags.push('<span class="tag good">ready</span>');
     if (opts.voted && p.alive && V.voted.includes(p.id)) tags.push('<span class="tag good">voted</span>');
     if (opts.life && !p.alive) tags.push('<span class="tag bad">out</span>');
-    const clue = opts.clues ? (V.clues.filter(c => c.pid === p.id && c.round === V.roundNo).map(c => c.text).pop() || '') : '';
-    const cls = [(opts.turn === p.id) ? 'cur' : '', (opts.life && !p.alive) ? 'out' : ''].join(' ');
-    return `<li class="${cls}">${avatar(p)}<span class="nm">${esc(p.name)}${p.id === V.me.id ? ' (you)' : ''}</span>${tags.join('')}${clue ? `<span class="clue">${esc(clue)}</span>` : ''}</li>`;
+    const cls = (opts.life && !p.alive) ? 'out' : '';
+    return `<li class="${cls}">${avatar(p)}<span class="nm">${esc(p.name)}${p.id === V.me.id ? ' (you)' : ''}</span>${tags.join('')}</li>`;
   }).join('')}</ul>`;
 }
 
@@ -794,7 +764,7 @@ function playerRows(opts = {}) {
 function lobbyHTML() {
   const V = ui.view, s = V.settings, isHost = V.me.isHost, n = V.players.length;
   const maxImp = Math.max(1, Math.floor((n - 1) / 2));
-  const hintLabel = { none: 'No clue', light: 'Light clue', strong: 'Strong clue' }[s.hint];
+  const hintLabel = { none: 'No hint', light: 'Light hint', strong: 'Strong hint' }[s.hint];
   const settings = isHost ? `
     <div class="setting"><label>Categories (words are picked from these)</label>
       <div class="chips">
@@ -807,14 +777,12 @@ function lobbyHTML() {
         <b>${Math.min(s.imposters, maxImp)}</b>
         <button data-act="set" data-key="imposters" data-val="${s.imposters + 1}" ${s.imposters >= maxImp ? 'disabled' : ''}>+</button>
       </div></div>
-    <div class="setting"><label>Clue given to the imposter</label>
+    <div class="setting"><label>Hint given to the imposter</label>
       <div class="seg">${['none', 'light', 'strong'].map(h => `<button class="${s.hint === h ? 'on' : ''}" data-act="set" data-key="hint" data-val="${h}">${{ none: 'None', light: 'Light', strong: 'Strong' }[h]}</button>`).join('')}</div></div>
-    <div class="setting"><label>Clue rounds before each vote</label>
-      <div class="seg">${[1, 2, 3].map(r => `<button class="${s.rounds === r ? 'on' : ''}" data-act="set" data-key="rounds" data-val="${r}">${r}</button>`).join('')}</div></div>
     <div class="setting"><label>Caught imposter gets one guess at the word</label>
       <div class="seg">${[[true, 'On'], [false, 'Off']].map(([v, l]) => `<button class="${s.guess === v ? 'on' : ''}" data-act="set" data-key="guess" data-val="${v}">${l}</button>`).join('')}</div></div>
   ` : `<p class="muted">Categories: ${s.cats.length === V.allCats.length ? 'all' : esc(s.cats.join(', '))}.<br>
-      Imposters: ${s.imposters}. Imposter clue: ${hintLabel.toLowerCase()}. Clue rounds: ${s.rounds}. Final guess: ${s.guess ? 'on' : 'off'}.</p>`;
+      Imposters: ${s.imposters}. Hint for the imposter: ${hintLabel.toLowerCase()}. Final guess: ${s.guess ? 'on' : 'off'}.</p>`;
   return `
     <section class="card">
       <h2>Game</h2>
@@ -823,7 +791,7 @@ function lobbyHTML() {
         <button class="game" disabled>Werewolf<small>Coming soon</small></button>
         <button class="game" disabled>Mafia<small>Coming soon</small></button>
       </div>
-      <p class="muted" style="margin-top:10px">Everyone gets the same secret word, except the imposter. Give clues, spot the bluffer, and vote them out.</p>
+      <p class="muted" style="margin-top:10px">Everyone gets the same secret word, except the imposter. Talk it over in person, spot the bluffer, and vote them out.</p>
     </section>
     <section class="card"><h2>Players (${n})</h2>${playerRows()}
       <p class="muted">Share the room code <b>${esc(V.code)}</b> or tap Invite to send the link.</p>
@@ -839,13 +807,13 @@ function roleHTML(r) {
   if (r.imp) {
     return `<div class="role imp"><span class="tag bad">You are the IMPOSTER</span>
       <p>Category: <b>${esc(r.cat)}</b></p>
-      ${r.hint ? `<p>Your clue: <b>${esc(r.hint)}</b></p>` : '<p class="muted">No clue this time. Listen closely.</p>'}
+      ${r.hint ? `<p>Your hint: <b>${esc(r.hint)}</b></p>` : '<p class="muted">No hint this time. Listen closely.</p>'}
       <p class="muted">Blend in. Say things that sound like you know the secret word.</p></div>`;
   }
   return `<div class="role"><span class="tag good">You are on the crew</span>
     <div class="word">${esc(r.word)}</div>
     <p>Category: <b>${esc(r.cat)}</b></p>
-    <p class="muted">Give a clue that shows you know it, without making it too easy for the imposter.</p></div>`;
+    <p class="muted">Talk about it in person without making it too easy for the imposter.</p></div>`;
 }
 function secretHTML() {
   const V = ui.view;
@@ -866,29 +834,17 @@ function revealHTML() {
     ${me.isHost ? '<button class="btn" data-act="forceReady">Start anyway</button>' : ''}`;
 }
 
-/* ----- clues ----- */
-function recapHTML(upTo) {
-  const V = ui.view;
-  const rounds = [...new Set(V.clues.map(c => c.round))].filter(r => upTo === undefined || r < upTo);
-  if (!rounds.length) return '';
-  const name = id => (V.players.find(p => p.id === id) || { name: '?' }).name;
-  return `<div class="recap">${rounds.map(r => `<h3>Round ${r}</h3>${V.clues.filter(c => c.round === r).map(c => `<div class="c"><span>${esc(name(c.pid))}</span><span>${esc(c.text)}</span></div>`).join('')}`).join('')}</div>`;
-}
-function cluesHTML() {
-  const V = ui.view, me = V.me, mine = V.turn === me.id;
+/* ----- talk: all discussion happens in person, the app only waits ----- */
+function talkHTML() {
+  const V = ui.view, me = V.me;
   const meP = V.players.find(p => p.id === me.id);
-  const speaker = V.players.find(p => p.id === V.turn);
-  const turnCard = mine
-    ? `<h2>Your turn</h2><p class="muted">Give one word or a short phrase about the secret word.</p>
-       <div class="row"><input id="clueInput" maxlength="30" autocomplete="off" placeholder="Your clue" value="${esc(ui.drafts.clueInput || '')}"><button class="btn primary" data-act="clue">Send</button></div>`
-    : `<h2>Round ${V.roundNo}</h2><p>Waiting for <b>${esc(speaker ? speaker.name : '...')}</b> to give a clue...</p>`;
-  return `<section class="card">${turnCard}
-      <p class="muted" style="margin-top:10px">Voting starts after round ${V.voteAfter}.</p></section>
-    <section class="card"><h2>Speaking order</h2>${playerRows({ turn: V.turn, clues: true, life: true, order: V.order })}
-      ${recapHTML(V.roundNo)}</section>
+  const out = V.players.filter(p => !p.alive).map(p => esc(p.name));
+  return `<section class="card"><h2>Talk it out</h2>
+      <p>Everyone has their secret card. Discuss it in person and work out who the imposter is.</p>
+      ${out.length ? `<p class="muted">Voted out so far: ${out.join(', ')}.</p>` : ''}</section>
     ${meP && meP.alive ? '' : '<div class="banner warn">You have been voted out. You can keep watching.</div>'}
     ${secretHTML()}
-    ${me.isHost ? `<div class="row"><button class="btn" data-act="skip">Skip speaker</button><button class="btn" data-act="toVote">Go to voting</button></div>` : ''}`;
+    ${me.isHost ? '<button class="btn primary big" data-act="toVote">Start voting</button>' : '<p class="muted" style="text-align:center">The host starts the vote when everyone is ready.</p>'}`;
 }
 
 /* ----- vote ----- */
@@ -904,7 +860,6 @@ function voteHTML() {
       <p class="muted">Pick the player you think is bluffing. You can change your vote until everyone has voted.</p>
       ${options}
       <p class="muted">${votedCount} of ${aliveOnline} votes in</p></section>
-    <section class="card"><h2>Clues so far</h2>${recapHTML() || '<p class="muted">No clues were given.</p>'}</section>
     ${secretHTML()}
     ${me.isHost ? '<button class="btn" data-act="tally">Count votes now</button>' : ''}`;
 }
@@ -954,7 +909,6 @@ function endHTML() {
       <p class="muted" style="text-align:center">Category: ${esc(e.cat)}</p>
       <p style="text-align:center">${e.imposters.length > 1 ? 'The imposters were' : 'The imposter was'} <b>${e.imposters.map(i => esc(name(i))).join(' and ')}</b></p>
     </section>
-    <section class="card"><h2>All clues</h2>${recapHTML() || '<p class="muted">No clues were given.</p>'}</section>
     ${me.isHost ? '<button class="btn primary" data-act="again">Play again</button>' : '<p class="muted" style="text-align:center">Waiting for the host to start another round...</p>'}`;
 }
 
@@ -1001,8 +955,6 @@ const A = {
   ready() { send({ t: 'ready' }); },
   forceReady() { send({ t: 'forceReady' }); },
   togglecard() { ui.showCard = !ui.showCard; render(); },
-  clue() { const t = (ui.drafts.clueInput || '').trim(); if (!t) return; ui.drafts.clueInput = ''; send({ t: 'clue', text: t }); },
-  skip() { send({ t: 'skip' }); },
   toVote() { send({ t: 'toVote' }); },
   vote(d) { send({ t: 'vote', id: d.id }); },
   tally() { send({ t: 'tally' }); },
@@ -1027,8 +979,7 @@ document.addEventListener('input', e => {
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const id = e.target.id;
-  if (id === 'clueInput') A.clue();
-  else if (id === 'guessInput') A.guess();
+  if (id === 'guessInput') A.guess();
   else if (id === 'codeInput') A.join();
   else if (id === 'nameInput') (ui.joinCode ? A.join() : (ui.codeDraft ? A.join() : A.create()));
 });
