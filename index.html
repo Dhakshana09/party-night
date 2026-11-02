@@ -291,8 +291,10 @@ class Host {
     this.peer = peer;
     peer.on('connection', conn => this.onConn(conn));
     peer.on('open', () => { this.online = true; this.broadcast(); });
-    peer.on('disconnected', () => { this.online = false; this.broadcast(); this.recover(); });
-    peer.on('error', err => { if (err && err.type !== 'peer-unavailable') this.recover(); });
+    // The recover calls are deferred on purpose: PeerJS emits 'disconnected' in the middle of destroying a peer,
+    // and reconnecting at that moment leaves a zombie connection that keeps holding the room code.
+    peer.on('disconnected', () => { this.online = false; this.broadcast(); setTimeout(() => this.recover(), 400); });
+    peer.on('error', err => { if (err && err.type !== 'peer-unavailable') setTimeout(() => this.recover(), 400); });
   }
   recover() {
     if (this.recovering) return;
@@ -305,6 +307,33 @@ class Host {
       setTimeout(() => ((this.peer.disconnected || this.peer.destroyed) ? step(n + 1) : (this.recovering = false)), Math.min(2500 + n * 1000, 8000));
     };
     step(0);
+  }
+  /* Check the room can really be reached by joining it from a throwaway peer. If not, rebuild it.
+     Only done in the lobby (or when nobody else is connected) so a running game is never disturbed. */
+  probe() {
+    const alone = [...this.players.values()].every(p => p.id === this.hostId || !p.connected);
+    if (this.probing || this.recovering || !this.peer.open || !(!this.game || alone)) return;
+    this.probing = true;
+    let done = false;
+    const test = new Peer(undefined, PEER_OPTS);
+    const finish = ok => {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      try { test.destroy(); } catch (e) { /* ignore */ }
+      this.probing = false;
+      if (!ok) this.rebuild();
+    };
+    const timer = setTimeout(() => finish(false), 9000);
+    test.on('open', () => {
+      const c = test.connect(PREFIX + this.code, { reliable: true, serialization: 'json' });
+      c.on('open', () => finish(true));
+    });
+    test.on('error', err => finish(!(err && err.type === 'peer-unavailable')));   // other errors are inconclusive
+  }
+  rebuild() {
+    this.online = false; this.broadcast();
+    try { this.peer.destroy(); } catch (e) { /* ignore */ }
+    setTimeout(() => this.recover(), 600);
   }
 
   /* ---------- connections ---------- */
@@ -580,10 +609,11 @@ function createRoom() {
 }
 
 const JOIN_WAIT = window.__JOIN_WAIT || 20;   // how many times to look for the room, 2 seconds apart
+const JOIN_TIMEOUT = window.__JOIN_TIMEOUT || 12000;   // how long one attempt may take before it counts as a timeout
 function explainFailure(reason, code) {
   const tail = ' (' + reason + ')';
   if (reason === 'peer-unavailable') return 'Room ' + code + ' is not online right now. Ask the host to open the Party Night page and keep it in front, then try again.' + tail;
-  if (reason === 'timeout' || reason === 'closed') return 'Found the room but could not connect. Some school, office or mobile networks block this. Try a different network, such as Wi-Fi instead of mobile data.' + tail;
+  if (reason === 'timeout' || reason === 'closed') return 'Could not reach room ' + code + '. Most likely the host page is asleep or closed. Ask them to open Party Night and keep it in front, then try again. If that does not help, your network may be blocking the connection, so try Wi-Fi instead of mobile data.' + tail;
   return 'Could not reach the connection server. Check your internet and try again.' + tail;
 }
 
@@ -609,7 +639,8 @@ function connectGuest(first) {
     ui.screen = 'home'; ui.error = text; render();
   };
   const retry = reason => {
-    if (guest !== me || me.leaving) return;
+    if (guest !== me || me.leaving || me.retried) return;   // one retry per attempt, even if several events fire
+    me.retried = true;
     if (ui.view) {
       if (++me.tries > 20) return giveUp('The host seems to have left the room.');
       ui.reconnecting = true; render();
@@ -617,9 +648,9 @@ function connectGuest(first) {
       return;
     }
     // Not in the room yet. If the room is simply not online (host away or still starting), keep looking for a while.
-    const max = reason === 'peer-unavailable' ? JOIN_WAIT : 3;
+    const max = reason === 'peer-unavailable' ? JOIN_WAIT : 4;
     if (++me.tries > max) return giveUp(explainFailure(reason, code));
-    ui.connectMsg = reason === 'peer-unavailable' ? 'Looking for room ' + code + '... the host needs to have the page open.' : 'Connecting...';
+    ui.connectMsg = (reason === 'peer-unavailable' || reason === 'timeout') ? 'Still looking for room ' + code + '... the host needs to have the page open.' : 'Connecting...';
     render();
     setTimeout(() => { if (guest === me) connectGuest(false); }, 2000);
   };
@@ -629,7 +660,7 @@ function connectGuest(first) {
   peer.on('open', () => {
     const conn = peer.connect(PREFIX + code, { reliable: true, serialization: 'json' });
     me.conn = conn;
-    const timer = setTimeout(() => { if (!conn.open) retry('timeout'); }, 12000);
+    const timer = setTimeout(() => { if (!conn.open) retry('timeout'); }, JOIN_TIMEOUT);
     conn.on('open', () => { clearTimeout(timer); conn.send({ t: 'join', name: ui.name, pid: PID }); });
     conn.on('data', msg => {
       if (!msg) return;
@@ -1010,8 +1041,9 @@ let wakeLock = null;
 async function keepAwake() {
   try { if (host && 'wakeLock' in navigator && !document.hidden) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* not supported or refused */ }
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && host) { host.recover(); keepAwake(); } });
-window.addEventListener('online', () => { if (host) host.recover(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && host) { host.recover(); keepAwake(); setTimeout(() => host && host.probe(), 1500); } });
+window.addEventListener('online', () => { if (host) { host.recover(); setTimeout(() => host && host.probe(), 1500); } });
+setInterval(() => { if (host && !document.hidden) host.probe(); }, 60000);
 
 (function boot() {
   const m = location.hash.match(/([A-Za-z]{4})/);
